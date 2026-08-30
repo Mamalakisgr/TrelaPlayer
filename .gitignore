@@ -25,3 +25,6 @@ dist-ssr
 
 # Rust / Tauri build output
 src-tauri/target
+
+# Local worktrees for isolated feature work
+.worktrees
