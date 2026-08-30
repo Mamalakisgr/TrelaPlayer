@@ -1,6 +1,6 @@
+use rand::Rng;
 use std::future::Future;
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 /// A single shared `reqwest::Client` for the AniList/TMDB HTTP calls.
@@ -64,6 +64,19 @@ where
         }
 
         last_err = format!("{} request failed: HTTP {}", service, status);
+        // Both AniList (GraphQL errors[0].message) and TMDB (status_message)
+        // put a real explanation in the error body — worth surfacing instead
+        // of just the bare status code, e.g. AniList returning 403 with body
+        // {"errors":[{"message":"The AniList API has been temporarily
+        // disabled due to severe stability issues."}]} reads as some kind of
+        // auth/permission problem as a bare "HTTP 403" when it's actually a
+        // site-wide outage on AniList's own end.
+        if let Ok(body) = serde_json::from_str::<serde_json::Value>(&resp.text().await.unwrap_or_default()) {
+            let detail = body["errors"][0]["message"].as_str().or_else(|| body["status_message"].as_str());
+            if let Some(detail) = detail {
+                last_err = format!("{}: {}", last_err, detail);
+            }
+        }
         if !matches!(status.as_u16(), 429 | 502 | 503 | 504) {
             break;
         }
@@ -73,35 +86,17 @@ where
 }
 
 /// Picks a pseudo-random integer in `0..bound` (0 if `bound` is 0) — good
-/// enough for "shuffle me a random pick", not a cryptographic use. Seeded
-/// from wall-clock nanos plus a call counter (so two calls within the same
-/// nanosecond, e.g. two rapid Shuffle clicks, still diverge) and mixed with
-/// splitmix64 to spread that seed out, avoiding a `rand` crate for this.
+/// enough for "shuffle me a random pick", not a cryptographic use.
 pub fn random_below(bound: u64) -> u64 {
     if bound == 0 {
         return 0;
     }
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64;
-    let mut z = nanos.wrapping_add(COUNTER.fetch_add(1, Ordering::Relaxed).wrapping_mul(0x9E3779B97F4A7C15));
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-    z ^= z >> 31;
-    z % bound
+    rand::rng().random_range(0..bound)
 }
 
-/// Minimal query-string escaping — avoids pulling in a whole crate just for
-/// `?query=<text>` where text may contain spaces/&/#.
+/// Query-string escaping for a `?query=<text>` value — same unreserved set
+/// (letters/digits/`-_.~`) the old hand-rolled version used.
 pub fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
+    const QUERY_SAFE: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC.remove(b'-').remove(b'_').remove(b'.').remove(b'~');
+    percent_encoding::utf8_percent_encode(s, QUERY_SAFE).to_string()
 }

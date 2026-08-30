@@ -88,6 +88,8 @@ pub struct TvSeason {
 pub struct TvEpisode {
     pub episode_number: u32,
     pub name: String,
+    pub still_url: Option<String>,
+    pub runtime: Option<u32>,
 }
 
 #[derive(Serialize, Clone)]
@@ -105,6 +107,12 @@ pub struct StreamOption {
     // not a direct video URL, so playback needs the full Release handed
     // back to play_fourk_stream to resolve it first (see fourkhdhub.rs).
     pub fourk_release: Option<serde_json::Value>,
+    // 0 for MovieBox (no mirror concept there — resourceLink is already the
+    // direct video URL). For 4KHDHub this is releases_to_moviebox_json's
+    // sourceCount, i.e. how many hosts (hubcloud/hubdrive) this specific
+    // encode can fall back across — shown in the GUI the same way
+    // moviebox-tui's own stream list shows "N mirrors" per encode.
+    pub mirrors: u32,
 }
 
 // A dubbed-language variant of a title — MovieBox treats each dub as its own
@@ -144,6 +152,13 @@ pub struct DownloadCompleteEvent {
 #[derive(Serialize, Clone)]
 pub struct DownloadErrorEvent {
     pub message: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct PlaybackProgressEvent {
+    pub watch_id: String,
+    pub position_seconds: Option<f64>,
+    pub duration_seconds: Option<f64>,
 }
 
 #[derive(Serialize, Clone)]

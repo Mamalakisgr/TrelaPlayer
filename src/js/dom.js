@@ -10,18 +10,7 @@ export function escapeAttr(s) {
   return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-export function skeletonRow(count = 5) {
-  return `<div class="skeleton-row">${Array.from({ length: count }, () => `
-    <div class="skeleton-card">
-      <div class="skeleton-poster"></div>
-      <div class="skeleton-line"></div>
-      <div class="skeleton-line short"></div>
-    </div>
-  `).join('')}</div>`;
-}
-
-// Same cards as skeletonRow, but sized by a CSS grid parent (like .poster-grid)
-// instead of a fixed 5-wide flex row — for search-result grids.
+// Sized by a CSS grid parent (like .poster-grid) — for search-result grids.
 export function skeletonGrid(count = 10) {
   return Array.from({ length: count }, () => `
     <div class="skeleton-card">
@@ -30,6 +19,11 @@ export function skeletonGrid(count = 10) {
       <div class="skeleton-line short"></div>
     </div>
   `).join('');
+}
+
+// Same cards as skeletonGrid, wrapped for a fixed 5-wide flex row instead.
+export function skeletonRow(count = 5) {
+  return `<div class="skeleton-row">${skeletonGrid(count)}</div>`;
 }
 
 // Matches the .hero shape the real renderSpotlightCard() fills in (see
@@ -46,8 +40,9 @@ export function skeletonSpotlight() {
   `;
 }
 
-// Renders an inline error with a Retry button (AniList/anidb.app both
-// occasionally 5xx transiently — retrying is more useful than a dead end).
+// Renders an inline error with a Retry button (AniList/the scraped anime
+// provider both occasionally 5xx transiently — retrying is more useful than
+// a dead end).
 export function renderError(container, message, onRetry) {
   container.innerHTML = `
     <div class="error-box">

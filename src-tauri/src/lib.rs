@@ -3,6 +3,7 @@ mod anilist;
 mod fourkhdhub;
 mod models;
 mod movplayer;
+mod mpv_progress;
 mod player;
 mod procutil;
 mod tmdb;
@@ -25,6 +26,9 @@ pub fn run() {
             anilist::get_anime_recommendations,
             player::watch_episode,
             player::update_ani_cli,
+            player::get_ani_cli_version,
+            player::update_moviebox_tui,
+            player::get_moviebox_tui_version,
             tmdb::search_movies,
             tmdb::get_genres,
             tmdb::get_trending_movies_tv,

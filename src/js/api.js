@@ -32,6 +32,9 @@ export const api = {
   resolveAnime: (title, expectedEpisodes, isReleasing) => invoke('resolve_anime', { title, expectedEpisodes: expectedEpisodes || undefined, isReleasing: !!isReleasing }),
   watchEpisode: (query, index, episode, quality) => invoke('watch_episode', { query, index, episode, quality }),
   updateAniCli: () => invoke('update_ani_cli', {}),
+  getAniCliVersion: () => invoke('get_ani_cli_version', {}),
+  updateMovieboxTui: () => invoke('update_moviebox_tui', {}),
+  getMovieboxTuiVersion: () => invoke('get_moviebox_tui_version', {}),
   // page starts at 1; returns { results, has_more } so the UI can offer
   // "Load more" instead of silently capping results at one page.
   searchMovies: (query, apiKey, page) => invoke('search_movies', { query, apiKey, page: page || 1 }),
@@ -52,8 +55,8 @@ export const api = {
   // find_playable_subject/find_playable_release in the backend.
   getStreamOptions: (title, season, episode, subjectId, year) =>
     invoke('get_stream_options', { title, season, episode, subjectId, year: year ? Number(year) : undefined }),
-  playStream: (resourceLink, windowTitle, subjectId, resourceId) =>
-    invoke('play_stream', { resourceLink, windowTitle, subjectId, resourceId }),
+  playStream: (resourceLink, windowTitle, subjectId, resourceId, startSeconds, watchId) =>
+    invoke('play_stream', { resourceLink, windowTitle, subjectId, resourceId, startSeconds: startSeconds || undefined, watchId }),
   getMovieSubject: (title, year) => invoke('get_movie_subject', { title, year: year ? Number(year) : undefined }),
   getSubtitleOptions: (subjectId, resourceId) => invoke('get_subtitle_options', { subjectId, resourceId }),
   startDownload: (resourceLink, title, season, episode, windowTitle, subtitleUrl) =>
@@ -66,5 +69,6 @@ export const api = {
   // releases: chosen quality first, then the other quality/codec options as
   // fallback — 4KHDHub's mirrors are third-party file hosts that go down
   // independently per-release, so the backend tries each in order.
-  playFourkStream: (releases, windowTitle) => invoke('play_fourk_stream', { releases, windowTitle }),
+  playFourkStream: (releases, windowTitle, startSeconds, watchId) =>
+    invoke('play_fourk_stream', { releases, windowTitle, startSeconds: startSeconds || undefined, watchId }),
 };

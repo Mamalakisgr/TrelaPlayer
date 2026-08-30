@@ -1,0 +1,12 @@
+{
+  "git": { "winget_id": "Git.Git" },
+  "scoop": {
+    "ani-cli": "ani-cli",
+    "moviebox-tui": "moviebox-tui"
+  },
+  "winget": {
+    "ani-cli": "Ani.Cli",
+    "moviebox-tui": "MovieBox.Tui",
+    "visual-studio-build-tools": "Microsoft.VisualStudio.2022.BuildTools"
+  }
+}

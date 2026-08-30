@@ -1,23 +1,10 @@
-import { readJson } from './storage.js';
+import { listStore } from './storage.js';
 
-const STORAGE_KEY = 'trela_wishlist';
+const store = listStore('trela_wishlist');
 
-export function getWishlist() {
-  const list = readJson(STORAGE_KEY, []);
-  return Array.isArray(list) ? list : [];
-}
-
-export function isInWishlist(id) {
-  return getWishlist().some((e) => e.id === id);
-}
+export const getWishlist = store.getAll;
+export const isInWishlist = store.has;
 
 // entry: { id, kind, title, year, image_url, tmdb_id }
-export function addToWishlist(entry) {
-  const list = getWishlist().filter((e) => e.id !== entry.id);
-  list.unshift({ ...entry, addedAt: Date.now() });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-}
-
-export function removeFromWishlist(id) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(getWishlist().filter((e) => e.id !== id)));
-}
+export const addToWishlist = (entry) => store.upsert(entry, 'addedAt');
+export const removeFromWishlist = store.remove;

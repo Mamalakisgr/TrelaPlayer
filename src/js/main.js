@@ -1,7 +1,7 @@
 import { api, onEvent } from './api.js';
 import { debounce, renderError, escapeAttr, skeletonGrid, skeletonSpotlight } from './dom.js';
 import { createSlideshow, seasonalCardHtml, recentEpisodeCardHtml, movieCardHtml } from './slideshow.js';
-import { getContinueWatching, saveContinueWatching, removeContinueWatching } from './continueWatching.js';
+import { getContinueWatching, saveContinueWatching, removeContinueWatching, updateContinueWatchingProgress } from './continueWatching.js';
 import { getWishlist, addToWishlist, removeFromWishlist, isInWishlist } from './wishlist.js';
 import { addToWatched, removeFromWatched, isWatched } from './watched.js';
 import { getNotifications, unreadCount, markAllRead, clearNotifications, recordEpisodeCounts } from './notifications.js';
@@ -60,14 +60,15 @@ function resumeContinueWatching(entry) {
   // nav to repeat the reset, so the one-time override below still covers them.
   const backOverride = { target: 'home', label: entry.title };
   if (kind === 'movie') {
-    selectMovieToWatch({ title: entry.title, year: entry.year, image_url: entry.image_url });
+    selectMovieToWatch({ title: entry.title, year: entry.year, image_url: entry.image_url }, entry.positionSeconds);
   } else if (kind === 'series') {
     selectSeriesEpisodeToWatch(
       { title: entry.title, year: entry.year, tmdb_id: entry.tmdb_id, image_url: entry.image_url },
       entry.season,
       entry.episode,
       undefined,
-      backOverride
+      backOverride,
+      entry.positionSeconds
     );
   } else {
     selectEpisode({ title: entry.title, status: entry.status, image_url: entry.image_url }, entry.episode, entry.quality, undefined, backOverride);
@@ -183,20 +184,28 @@ function renderContinueWatching() {
   // now that saved entries carry image_url — old entries saved before that
   // (no image_url) just fall back to the poster-gradient placeholder.
   list.innerHTML = entries
-    .map(
-      (e, i) => `
+    .map((e, i) => {
+      // Only rendered when both numbers are real — a missing duration (mpv
+      // couldn't be IPC-queried, or the value hasn't been reported at all
+      // yet) means no bar rather than a wrong/nonsensical one.
+      const hasProgress = e.durationSeconds > 0 && e.positionSeconds != null;
+      const progressBar = hasProgress
+        ? `<div class="continue-progress"><div class="continue-progress-fill" style="width:${Math.min(100, (e.positionSeconds / e.durationSeconds) * 100).toFixed(1)}%"></div></div>`
+        : '';
+      return `
       <div class="poster-card" data-index="${i}" tabindex="0" role="button" aria-label="Resume ${escapeAttr(e.title)}">
         <div class="poster-image-wrap">
           ${e.image_url ? `<img src="${e.image_url}" alt="${escapeAttr(e.title)}" loading="lazy" />` : ''}
           <button class="continue-remove" data-remove="${i}" aria-label="Remove" type="button">&times;</button>
+          ${progressBar}
           <div class="poster-reveal">
             <div class="poster-title">${e.title}</div>
             <div class="poster-sub">${continueWatchingSubtitle(e)}</div>
           </div>
         </div>
       </div>
-    `
-    )
+    `;
+    })
     .join('') +
     `<button type="button" id="continue-find-new" class="see-all-card continue-find-new">
       <span class="continue-find-icon">+</span>
@@ -1162,6 +1171,18 @@ async function loadSeriesEpisodes(series, seasonNumber) {
 
 // ---------- Watching ----------
 
+const QUALITY_LABELS = { best: 'Best quality', '1080': '1080p', '720': '720p', '480': '480p', '360': '360p', worst: 'Worst quality' };
+
+// Single place the player-panel status line is written from, so the accent
+// dot next to it (see .watch-status-line in styles.css) always matches the
+// text's error/normal state instead of only the text itself turning red.
+function setPlayerStatus(text, { error = false, html = false } = {}) {
+  const el = document.getElementById('player-status');
+  if (html) el.innerHTML = text;
+  else el.textContent = text;
+  document.getElementById('watch-status-line').classList.toggle('is-error', error);
+}
+
 function getSelectedQuality() {
   return document.querySelector('input[name="quality"]:checked')?.value || 'best';
 }
@@ -1183,14 +1204,19 @@ function setQualitySelectorVisible(visible) {
 // available resources vary per title (sometimes several encodes at the same
 // resolution), so the Watching page fetches and lists the real options.
 let currentStreamOptions = [];
+// Bumped on every loadStreamOptions call so a slow/stale request (user backed
+// out or hit Next Episode while it was in flight) can detect it's no longer
+// the latest and bail instead of overwriting currentStreamOptions with the
+// wrong title's sources.
+let streamOptionsRequestId = 0;
 
 function setStreamOptionsVisible(visible) {
   document.getElementById('stream-options-wrap').classList.toggle('hidden', !visible);
 }
 
 function getSelectedStreamOption() {
-  const idx = document.querySelector('input[name="stream-option"]:checked')?.value;
-  return currentStreamOptions[idx !== undefined ? Number(idx) : 0];
+  const idx = document.getElementById('stream-options-seg').value;
+  return currentStreamOptions[idx !== '' ? Number(idx) : 0];
 }
 
 // Download-and-play is MovieBox-only — used to be decided once from the
@@ -1202,25 +1228,6 @@ function updateDownloadEligibility() {
   document.getElementById('download-btn').disabled = !option || !!option.fourk_release;
 }
 
-// Options come back sorted by resolution (desc) but not deduplicated — the
-// same resolution often has several encodes from different uploaders. Group
-// them so each resolution gets one button; a second+ option in a group
-// collapses behind a caret instead of cluttering the row with e.g. three
-// separate "1080p" buttons.
-function groupStreamOptionsByResolution(options) {
-  const groups = [];
-  const byResolution = new Map();
-  options.forEach((o, flatIndex) => {
-    if (!byResolution.has(o.resolution)) {
-      const group = { resolution: o.resolution, items: [] };
-      byResolution.set(o.resolution, group);
-      groups.push(group);
-    }
-    byResolution.get(o.resolution).items.push({ ...o, flatIndex });
-  });
-  return groups;
-}
-
 // MovieBox and 4KHDHub options are merged into one flat list (see
 // loadStreamOptions) — each StreamOption already self-tags which source it
 // came from via fourk_release, so grouping/labeling just reads that instead
@@ -1229,40 +1236,52 @@ function sourceLabel(option) {
   return option.fourk_release ? '4KHDHub' : 'MovieBox';
 }
 
-function streamGroupHtml(group, isFirstGroup) {
-  const [primary, ...others] = group.items;
-  const label = `${group.resolution}p`;
-  const caret = others.length ? `<button type="button" class="stream-caret" aria-label="More ${label} sources">&#9662;</button>` : '';
-  const dropdown = others.length
-    ? `<div class="stream-dropdown hidden">
-        ${others
-          .map(
-            (o) => `
-            <label class="stream-dropdown-item" title="Uploaded by ${escapeAttr(o.uploader)}">
-              <input type="radio" name="stream-option" value="${o.flatIndex}">
-              ${escapeAttr(sourceLabel(o))} · ${escapeAttr(o.codec)} · ${escapeAttr(o.size)} · ${escapeAttr(o.uploader)}
-            </label>
-          `
-          )
-          .join('')}
-      </div>`
-    : '';
-  return `
-    <div class="stream-group">
-      <label class="seg-opt stream-primary" title="${escapeAttr(sourceLabel(primary))} · Uploaded by ${escapeAttr(primary.uploader)}">
-        <input type="radio" name="stream-option" value="${primary.flatIndex}" ${isFirstGroup ? 'checked' : ''}>
-        ${label}
-      </label>
-      ${caret}
-      ${dropdown}
-    </div>
-  `;
+// mirrors is 0 for MovieBox (no such concept there — see StreamOption in
+// models.rs), so this only ever renders for 4KHDHub options, matching
+// moviebox-tui's own "N mirrors" per-encode display.
+function mirrorLabel(option) {
+  return option.mirrors ? ` · ${option.mirrors} mirror${option.mirrors === 1 ? '' : 's'}` : '';
 }
 
-// Caret/dropdown clicks are wired once via delegation on #stream-options-seg
-// itself (see initStreamOptionsSeg) since this innerHTML gets replaced on
-// every episode/movie change.
+// 4KHDHub's uploader is that release's full filename (see extract_stream_options
+// in movplayer.rs), e.g. "Supernatural S04E06 1080p BluRay REMUX AVC
+// (EPSiLON-4kHdHub.com).mkv" — title/resolution are already implied by
+// context and codec's already shown separately, so the only part worth
+// surfacing inline is the release-group tag in the trailing parens (the
+// actual reason fileName was preferred over uploadBy in the first place: it's
+// what distinguishes two same-resolution/codec releases). MovieBox's uploader
+// has no parens and is returned as-is; the full string is still in the row's
+// title tooltip either way.
+function shortUploader(option) {
+  const match = option.uploader.match(/\(([^)]+)\)[^()]*$/);
+  return match ? match[1].replace(/[-.]?4khdhub\.com$/i, '') : option.uploader;
+}
+
+// A native <select>, same as the Language/Subtitle rows right next to it —
+// <optgroup> gives the resolution grouping for free (no custom popover/caret
+// to maintain, no manual width-vs-overflow fight: the OS renders the open
+// list, so a long label just fits the way every other select's does).
+// Options come back sorted by resolution (desc), so a group is opened each
+// time it changes rather than needing a separate grouping pass.
+function streamOptionsHtml(options) {
+  let lastResolution = null;
+  let html = '';
+  options.forEach((o, i) => {
+    if (o.resolution !== lastResolution) {
+      if (lastResolution !== null) html += '</optgroup>';
+      html += `<optgroup label="${o.resolution}p">`;
+      lastResolution = o.resolution;
+    }
+    html += `<option value="${i}">${escapeAttr(sourceLabel(o))} · ${escapeAttr(o.codec)} · ${escapeAttr(o.size)}${mirrorLabel(o)} · ${escapeAttr(shortUploader(o))}</option>`;
+  });
+  if (lastResolution !== null) html += '</optgroup>';
+  return html;
+}
+
+// Wired once via delegation on #stream-options-seg (see initStreamOptionsSeg)
+// since this innerHTML gets replaced on every episode/movie change.
 async function loadStreamOptions(title, season, episode, subjectId, year) {
+  const requestId = ++streamOptionsRequestId;
   const seg = document.getElementById('stream-options-seg');
   const playBtn = document.getElementById('play-btn');
   const downloadBtn = document.getElementById('download-btn');
@@ -1270,80 +1289,130 @@ async function loadStreamOptions(title, season, episode, subjectId, year) {
   seg.innerHTML = '';
   playBtn.disabled = true;
   downloadBtn.disabled = true;
-  document.getElementById('player-status').textContent = 'Loading sources...';
+  setPlayerStatus('Loading sources...');
 
   // Both sources are fetched together and merged (Promise.allSettled, not
   // Promise.all) so one being down — e.g. MovieBox flaky — doesn't hide
   // options the other source still has.
+  //
+  // subjectId === null means prepareMovieboxSubject's own MovieBox search
+  // already just failed for this exact title — calling getStreamOptions
+  // anyway would only re-run that identical search a second time (it does
+  // its own subject lookup whenever subject_id is missing), paying a real
+  // multi-second failure cost twice for no chance of a different outcome.
   const [moviebox, fourk] = await Promise.allSettled([
-    api.getStreamOptions(title, season, episode, subjectId, year),
+    subjectId === null ? Promise.reject(new Error('MovieBox search failed — see above.')) : api.getStreamOptions(title, season, episode, subjectId, year),
     api.getFourkStreamOptions(title, season, episode, year),
   ]);
+  if (requestId !== streamOptionsRequestId) return; // superseded by a newer call while these were in flight
+
+  // Each source's own list is already resolution-sorted, but concatenating
+  // them isn't — without re-sorting, the first (pre-selected) group is
+  // whichever source happens to come first in the array, not the actual
+  // best resolution across both (e.g. MovieBox topping out at 720p would
+  // still win the default over a 1080p 4KHDHub option).
   currentStreamOptions = [
     ...(moviebox.status === 'fulfilled' ? moviebox.value : []),
     ...(fourk.status === 'fulfilled' ? fourk.value : []),
-  ];
+  ].sort((a, b) => b.resolution - a.resolution);
 
   if (!currentStreamOptions.length) {
     const firstError = moviebox.status === 'rejected' ? moviebox.reason : fourk.reason;
-    document.getElementById('player-status').textContent = `Error: ${firstError}`;
+    setPlayerStatus(`Error: ${firstError}`, { error: true });
     return;
   }
 
-  const groups = groupStreamOptionsByResolution(currentStreamOptions);
-  seg.innerHTML = groups.map((g, i) => streamGroupHtml(g, i === 0)).join('');
+  seg.innerHTML = streamOptionsHtml(currentStreamOptions);
   playBtn.disabled = false;
   updateDownloadEligibility();
-  document.getElementById('player-status').textContent = 'Ready to play';
+  const selected = currentStreamOptions[0];
+  setPlayerStatus(`${currentStreamOptions.length} source${currentStreamOptions.length === 1 ? '' : 's'} found · ${sourceLabel(selected)} ${selected.resolution}p selected`);
   refreshSubtitleOptions();
+  updateWatchMetaRow();
+  updateSettingsSummary();
 }
 
-// Delegated so it keeps working after loadStreamOptions replaces the seg's
-// innerHTML on every episode/movie change — no per-render rewiring needed.
+// Bound once — loadStreamOptions only ever replaces the select's innerHTML
+// (its options), never the select element itself, so this keeps working
+// across every episode/movie change with no per-render rewiring needed.
 function initStreamOptionsSeg() {
   const seg = document.getElementById('stream-options-seg');
-  seg.addEventListener('click', (e) => {
-    const caret = e.target.closest('.stream-caret');
-    if (!caret) return;
-    e.preventDefault();
-    const dropdown = caret.nextElementSibling;
-    const isOpen = !dropdown.classList.contains('hidden');
-    seg.querySelectorAll('.stream-dropdown').forEach((d) => d.classList.add('hidden'));
-    if (!isOpen) dropdown.classList.remove('hidden');
+  seg.addEventListener('change', () => {
+    updateDownloadEligibility();
+    refreshSubtitleOptions();
+    updateWatchMetaRow();
+    updateSettingsSummary();
   });
-  seg.addEventListener('change', (e) => {
-    if (e.target.name === 'stream-option') {
-      seg.querySelectorAll('.stream-dropdown').forEach((d) => d.classList.add('hidden'));
-      updateDownloadEligibility();
-      refreshSubtitleOptions();
-    }
-  });
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('#stream-options-seg')) {
-      seg.querySelectorAll('.stream-dropdown').forEach((d) => d.classList.add('hidden'));
+}
+
+// Quality/language/source/subtitle live inline under the player now, collapsed
+// by default — open/closed state persists for the session (not per title), and
+// the header always shows a summary of the current selection so collapsing is
+// safe (see styles.css .watch-settings-*).
+function setSettingsOpen(open, persist = true) {
+  document.getElementById('watch-settings-body').classList.toggle('hidden', !open);
+  document.getElementById('watch-settings-header').setAttribute('aria-expanded', open ? 'true' : 'false');
+  document.getElementById('watch-settings-chevron').textContent = open ? 'Hide ⌃' : 'Change ⌄';
+  if (persist) sessionStorage.setItem('trela_watch_settings_open', open ? '1' : '0');
+}
+
+function applySettingsOpenState() {
+  setSettingsOpen(sessionStorage.getItem('trela_watch_settings_open') === '1', false);
+}
+
+function initWatchSettingsToggle() {
+  const header = document.getElementById('watch-settings-header');
+  const toggle = () => setSettingsOpen(document.getElementById('watch-settings-body').classList.contains('hidden'));
+  header.addEventListener('click', toggle);
+  header.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggle();
     }
   });
 }
 
-// Quality/language/source/subtitle used to be 4 always-visible rows on the
-// Watching page — now they live behind one gear button, mirroring the
-// notif-bell dropdown pattern (see initNotifications). Each row keeps its own
-// show/hide logic untouched; this only toggles the shared popover shell.
-function initWatchSettingsToggle() {
-  const btn = document.getElementById('watch-settings-btn');
-  const popover = document.getElementById('watch-settings-popover');
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const isOpen = !popover.classList.contains('hidden');
-    popover.classList.toggle('hidden', isOpen);
-    btn.setAttribute('aria-expanded', String(!isOpen));
-  });
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.watch-settings-wrap')) {
-      popover.classList.add('hidden');
-      btn.setAttribute('aria-expanded', 'false');
-    }
-  });
+// The player panel's meta row states what the play button will actually
+// launch with — recomputed on entry and whenever a setting changes, never
+// left as static copy (see README "Watch Episode page redesign").
+function updateWatchMetaRow() {
+  if (!pendingPlay) return;
+  if (pendingPlay.kind === 'anime') {
+    renderMetaParts('watch-player-meta', [QUALITY_LABELS[getSelectedQuality()] || 'Best quality', 'ani-cli']);
+    return;
+  }
+  const option = getSelectedStreamOption();
+  if (!option) {
+    document.getElementById('watch-player-meta').innerHTML = '';
+    return;
+  }
+  renderMetaParts('watch-player-meta', [
+    `${option.resolution}p`,
+    sourceLabel(option),
+    option.codec,
+    option.size,
+    option.mirrors ? `${option.mirrors} mirror${option.mirrors === 1 ? '' : 's'}` : '',
+  ]);
+}
+
+// The settings header's summary is what makes collapsing the panel safe —
+// it must always reflect live state, so it's recomputed alongside the meta
+// row above.
+function updateSettingsSummary() {
+  const el = document.getElementById('watch-settings-summary');
+  if (!pendingPlay) return;
+  if (pendingPlay.kind === 'anime') {
+    el.textContent = QUALITY_LABELS[getSelectedQuality()] || 'Best quality';
+    return;
+  }
+  const option = getSelectedStreamOption();
+  const parts = [];
+  if (option) parts.push(`${option.resolution}p`, sourceLabel(option));
+  const langText = document.getElementById('watch-language-select').selectedOptions[0]?.textContent;
+  if (langText && langText !== 'Default') parts.push(langText);
+  const subText = document.getElementById('watch-subtitle-select').selectedOptions[0]?.textContent;
+  parts.push(subText && subText !== 'None' ? subText : 'No subtitles');
+  el.textContent = parts.join(' · ');
 }
 
 // ---------- Movies/series: language picker + subtitle-select download fallback ----------
@@ -1424,10 +1493,15 @@ async function refreshSubtitleOptions() {
 
 function initPlaybackMemory() {
   document.querySelectorAll('input[name="quality"]').forEach((el) => {
-    el.addEventListener('change', (e) => localStorage.setItem('trela_last_quality', e.target.value));
+    el.addEventListener('change', (e) => {
+      localStorage.setItem('trela_last_quality', e.target.value);
+      updateWatchMetaRow();
+      updateSettingsSummary();
+    });
   });
   document.getElementById('watch-subtitle-select').addEventListener('change', (e) => {
     localStorage.setItem('trela_last_subtitle_lang', e.target.selectedOptions[0]?.textContent || '');
+    updateSettingsSummary();
   });
 }
 
@@ -1467,12 +1541,29 @@ async function startDownloadAndPlay() {
   setDownloadProgress(0, 'Starting download...');
   try {
     await api.startDownload(option.resource_link, pendingPlay.title, season, episode, windowTitle, subtitleUrl);
+    // Mirrors the saveContinueWatching call in startPlayback's movie/series
+    // branch — start_download spawns mpv (with the same watch_id scheme)
+    // once the download finishes, so this path needs to join Continue
+    // Watching too or its progress-bar events never have an entry to update.
+    const watchId = pendingPlay.kind === 'movie' ? `movie:${pendingPlay.title}` : `series:${pendingPlay.title}`;
+    saveContinueWatching(
+      pendingPlay.kind === 'movie'
+        ? { id: watchId, kind: 'movie', title: pendingPlay.title, year: pendingPlay.year, image_url: pendingPlay.image_url }
+        : {
+            id: watchId,
+            kind: 'series',
+            title: pendingPlay.title,
+            year: pendingPlay.year,
+            season: pendingPlay.season,
+            episode: pendingPlay.episode,
+            tmdb_id: pendingPlay.tmdb_id,
+            image_url: pendingPlay.image_url,
+          }
+    );
   } catch (e) {
     downloadBtn.disabled = false;
     setDownloadProgress(null, '');
-    const statusEl = document.getElementById('player-status');
-    statusEl.style.color = '#ef4444';
-    statusEl.textContent = `Error: ${e}`;
+    setPlayerStatus(`Error: ${e}`, { error: true });
   }
 }
 
@@ -1485,14 +1576,29 @@ function initDownloadEvents() {
   onEvent('download-complete', (payload) => {
     setDownloadProgress(100, 'Download complete — playing...');
     document.getElementById('download-btn').disabled = false;
-    document.getElementById('player-status').textContent = `Downloaded to ${payload.path}`;
+    setPlayerStatus(`Downloaded to ${payload.path}`);
   });
   onEvent('download-error', (payload) => {
     setDownloadProgress(null, '');
     document.getElementById('download-btn').disabled = false;
-    const statusEl = document.getElementById('player-status');
-    statusEl.style.color = '#ef4444';
-    statusEl.textContent = `Download error: ${payload.message}`;
+    setPlayerStatus(`Download error: ${payload.message}`, { error: true });
+  });
+}
+
+// mpv reports position/duration once (see mpv_progress.rs's track()) when
+// it closes — keyed by watch_id, the same id saveContinueWatching already
+// used for this entry, not by "whatever pendingPlay currently is" (mpv can
+// still be open, and later closed, well after the user has navigated
+// elsewhere in the app).
+function initPlaybackProgressEvents() {
+  onEvent('playback-progress', (payload) => {
+    // The duration IPC query can occasionally get an implausible answer back
+    // from mpv — same "just don't show it if it looks wrong" philosophy as
+    // the null checks below.
+    if (payload.position_seconds == null || payload.duration_seconds == null) return;
+    if (payload.position_seconds > payload.duration_seconds) return;
+    updateContinueWatchingProgress(payload.watch_id, payload.position_seconds, payload.duration_seconds);
+    renderContinueWatching();
   });
 }
 
@@ -1542,7 +1648,7 @@ function sequentialNav(current, onGo) {
   return { onPrev: n > 1 ? () => onGo(cast(n - 1)) : null, onNext: () => onGo(cast(n + 1)) };
 }
 
-function enterWatching(play, { showQuality = false, backTarget, crumbTitle, metaHtml, quality, nav }) {
+function enterWatching(play, { showQuality = false, backTarget, crumbTitle, kicker, title, quality, nav }) {
   pendingPlay = play;
   setQualitySelectorVisible(showQuality);
   setStreamOptionsVisible(!showQuality);
@@ -1558,17 +1664,197 @@ function enterWatching(play, { showQuality = false, backTarget, crumbTitle, meta
   setWatchingBackTarget(backTarget, crumbTitle);
   showView('watching');
 
-  document.getElementById('watch-meta').innerHTML = metaHtml;
-  document.getElementById('player-status').style.color = '';
+  document.getElementById('watch-kicker-row').classList.toggle('hidden', !kicker);
+  document.getElementById('watch-kicker-text').textContent = kicker || '';
+  document.getElementById('watch-title').textContent = title;
   if (showQuality) setSelectedQuality(quality || getLastQuality() || 'best');
 
   document.getElementById('play-btn').disabled = !showQuality;
-  document.getElementById('player-status').textContent = 'Ready to play';
+  setPlayerStatus(showQuality ? 'Ready to play — opens in mpv' : 'Loading sources...');
   setEpisodeNav(nav || null);
+  applySettingsOpenState();
+  updateWatchMetaRow();
+  updateSettingsSummary();
 }
 
 // backOverride: { target, label } — see selectSeriesEpisodeToWatch's comment,
 // same reasoning applies here for a resumed anime's Next/Prev Episode clicks.
+// ---------- Watching: episode strip + sidebar (poster card, recommendations) ----------
+
+// Renders a horizontal, scroll-snapped strip of episode cards from a list of
+// { episode_number, still_url?, runtime? } — shared by anime (bare numbers,
+// no per-episode art available from AniList) and series (real TMDB stills/
+// runtime). `current` marks the one whose page is open right now; there's no
+// per-episode watched history stored anywhere in the app, so every other
+// card is left unlabeled rather than guessing at past viewing.
+function renderEpisodeTrack(episodes, current, { ariaLabel, sub, onSelect }) {
+  const track = document.getElementById('watch-episode-track');
+  track.innerHTML = episodes
+    .map((ep) => {
+      const isCurrent = ep.episode_number === current;
+      const style = ep.still_url ? ` style="background-image:url('${ep.still_url}')"` : '';
+      return `
+        <div class="watch-ep-card${isCurrent ? ' is-current' : ''}" data-episode="${ep.episode_number}" role="button" tabindex="0" aria-current="${isCurrent ? 'true' : 'false'}" aria-label="${escapeAttr(ariaLabel(ep, isCurrent))}">
+          <div class="watch-ep-thumb"${style}>
+            <span class="watch-ep-badge watch-ep-num">${ep.episode_number}</span>
+            ${isCurrent ? '<span class="watch-ep-badge watch-ep-state">Playing</span>' : ''}
+            <div class="watch-ep-progress-track"><div class="watch-ep-progress-fill" style="width:${isCurrent ? 100 : 0}%"></div></div>
+          </div>
+          <div class="watch-ep-meta">
+            <div class="watch-ep-title">Episode ${ep.episode_number}</div>
+            <div class="watch-ep-sub">${escapeAttr(sub(ep, isCurrent))}</div>
+          </div>
+        </div>`;
+    })
+    .join('');
+  track.querySelectorAll('.watch-ep-card').forEach((card) => {
+    card.addEventListener('click', () => onSelect(card.dataset.episode));
+  });
+  // scrollLeft, never scrollIntoView — the latter can drag ancestor scroll
+  // containers (the page itself) along with it.
+  const currentCard = track.querySelector('.watch-ep-card.is-current');
+  if (currentCard) track.scrollLeft = Math.max(0, currentCard.offsetLeft - (track.clientWidth - currentCard.clientWidth) / 2);
+}
+
+// Anime has no per-episode stills/runtime from AniList — the strip only
+// needs to know the total count to render 1..N, and is hidden without one
+// (shallow Continue Watching/Recent Episodes entries never carry it).
+function renderAnimeEpisodeStrip(anime, episodeNum, goTo) {
+  const section = document.getElementById('watch-episodes');
+  const total = anime.episodes;
+  if (!total) {
+    section.classList.add('hidden');
+    return;
+  }
+  section.classList.remove('hidden');
+  document.getElementById('watch-episodes-season-pills').innerHTML = '';
+  const countEl = document.getElementById('watch-episodes-count');
+  countEl.textContent = `${total} episode${total === 1 ? '' : 's'}`;
+  countEl.classList.remove('hidden');
+  const episodes = Array.from({ length: total }, (_, i) => ({ episode_number: String(i + 1) }));
+  renderEpisodeTrack(episodes, String(episodeNum), {
+    ariaLabel: (ep, isCurrent) => `Episode ${ep.episode_number}${isCurrent ? ' — Now playing' : ''}`,
+    sub: (ep, isCurrent) => (isCurrent ? 'Now playing' : ''),
+    onSelect: goTo,
+  });
+}
+
+const seasonsCache = new Map(); // tmdb_id -> TvSeason[]
+async function getCachedSeasons(tmdbId, apiKey) {
+  if (!seasonsCache.has(tmdbId)) seasonsCache.set(tmdbId, await api.getTvSeasons(tmdbId, apiKey));
+  return seasonsCache.get(tmdbId);
+}
+
+// jumpTo(seasonNumber, episodeNumber) performs a real navigation (same as
+// clicking an episode on the Details page); season pills only change which
+// season's episodes the strip is *browsing* and don't navigate by themselves.
+async function renderSeriesEpisodeStrip(series, season, episode, jumpTo) {
+  const section = document.getElementById('watch-episodes');
+  section.classList.remove('hidden');
+  document.getElementById('watch-episodes-count').classList.add('hidden');
+  const pillsEl = document.getElementById('watch-episodes-season-pills');
+  const track = document.getElementById('watch-episode-track');
+
+  const showSeason = async (browsedSeason) => {
+    try {
+      const episodes = await api.getSeasonEpisodes(series.tmdb_id, browsedSeason, getTmdbKey());
+      track.scrollLeft = 0;
+      renderEpisodeTrack(episodes, browsedSeason === season ? episode : -1, {
+        ariaLabel: (ep, isCurrent) =>
+          `Season ${browsedSeason}, episode ${ep.episode_number}${isCurrent ? ' — Now playing' : ep.runtime ? ` — Not watched · ${ep.runtime} min` : ' — Not watched'}`,
+        sub: (ep, isCurrent) => (isCurrent ? 'Now playing' : ep.runtime ? `${ep.runtime} min` : ''),
+        onSelect: (num) => jumpTo(browsedSeason, Number(num)),
+      });
+    } catch (e) {
+      section.classList.add('hidden');
+    }
+  };
+
+  try {
+    const seasons = await getCachedSeasons(series.tmdb_id, getTmdbKey());
+    pillsEl.innerHTML = seasons
+      .map(
+        (s) =>
+          `<span role="button" tabindex="0" class="watch-season-pill${s.season_number === season ? ' active' : ''}" data-season="${s.season_number}">${escapeAttr(s.name || 'Season ' + s.season_number)}</span>`
+      )
+      .join('');
+    pillsEl.querySelectorAll('.watch-season-pill').forEach((pill) => {
+      pill.addEventListener('click', () => {
+        pillsEl.querySelectorAll('.watch-season-pill').forEach((p) => p.classList.remove('active'));
+        pill.classList.add('active');
+        showSeason(Number(pill.dataset.season));
+      });
+    });
+  } catch (e) {
+    pillsEl.innerHTML = '';
+  }
+  showSeason(season);
+}
+
+function renderWatchPosterCard({ title, imageUrl, rating, metaLine, genres }) {
+  document.getElementById('watch-poster-img').style.backgroundImage = imageUrl ? `url('${imageUrl}')` : '';
+  const ratingEl = document.getElementById('watch-rating-chip');
+  ratingEl.textContent = rating || '';
+  ratingEl.classList.toggle('hidden', !rating);
+  document.getElementById('watch-side-title').textContent = title;
+  document.getElementById('watch-side-meta').textContent = metaLine;
+  document.getElementById('watch-side-tags').innerHTML = (genres || [])
+    .slice(0, 3)
+    .map((g) => `<span class="tag tag-accent">${escapeAttr(g)}</span>`)
+    .join('');
+}
+
+function watchRecRowHtml(item, metaText) {
+  return `
+    <div class="watch-rec-row" role="button" tabindex="0" aria-label="${escapeAttr(item.title)}">
+      <div class="watch-rec-thumb" style="${item.image_url ? `background-image:url('${item.image_url}')` : ''}"></div>
+      <div class="watch-rec-info">
+        <div class="watch-rec-title">${escapeAttr(item.title)}</div>
+        <div class="watch-rec-meta">${escapeAttr(metaText)}</div>
+      </div>
+    </div>`;
+}
+
+// Hidden entirely below 2 results rather than padding the list out with
+// nothing to show.
+function renderWatchRecs(items, metaFor, onSelect) {
+  const section = document.getElementById('watch-recs-section');
+  const list = document.getElementById('watch-recs-list');
+  if (!items || items.length < 2) {
+    section.classList.add('hidden');
+    list.innerHTML = '';
+    return;
+  }
+  section.classList.remove('hidden');
+  const shown = items.slice(0, 4);
+  list.innerHTML = shown.map((item) => watchRecRowHtml(item, metaFor(item))).join('');
+  list.querySelectorAll('.watch-rec-row').forEach((row, i) => {
+    row.addEventListener('click', () => onSelect(shown[i]));
+  });
+}
+
+async function loadWatchAnimeRecs(id) {
+  try {
+    const items = await api.getAnimeRecommendations(id);
+    renderWatchRecs(
+      items,
+      (item) => [item.episodes ? `${item.episodes} eps` : capitalize(item.status || ''), item.score ? `★ ${item.score}` : ''].filter(Boolean).join(' · '),
+      selectAnime
+    );
+  } catch (e) {
+    renderWatchRecs([], null, null);
+  }
+}
+
+async function loadWatchMediaRecs(mediaType, tmdbId, onSelect) {
+  try {
+    const items = await api.getRecommendations(mediaType, tmdbId, getTmdbKey());
+    renderWatchRecs(items, (item) => [item.year, item.rating ? `★ ${item.rating.toFixed(1)}` : ''].filter(Boolean).join(' · '), onSelect);
+  } catch (e) {
+    renderWatchRecs([], null, null);
+  }
+}
+
 function selectEpisode(anime, episodeNum, quality, episodeNumbers, backOverride) {
   const goTo = (num) => selectEpisode(anime, num, undefined, episodeNumbers, backOverride);
   const nav = episodeNumbers ? buildEpisodeNav(episodeNumbers, episodeNum, goTo) : sequentialNav(episodeNum, goTo);
@@ -1578,21 +1864,45 @@ function selectEpisode(anime, episodeNum, quality, episodeNumbers, backOverride)
       showQuality: true,
       backTarget: backOverride?.target || 'details',
       crumbTitle: backOverride?.label || anime.title,
-      metaHtml: `<span class="tag">Episode ${episodeNum}</span><h1>${anime.title}</h1>`,
+      kicker: anime.episodes ? `Episode ${episodeNum} of ${anime.episodes}` : `Episode ${episodeNum}`,
+      title: anime.title,
       quality,
       nav,
     }
   );
+  renderAnimeEpisodeStrip(anime, episodeNum, goTo);
+  renderWatchPosterCard({
+    title: anime.title,
+    imageUrl: anime.image_url,
+    rating: anime.score,
+    metaLine: [anime.episodes ? `${anime.episodes} eps` : capitalize(anime.status || ''), 'Anime'].filter(Boolean).join(' · '),
+    genres: anime.genres,
+  });
+  if (anime.id) loadWatchAnimeRecs(anime.id);
+  else renderWatchRecs([], null, null);
 }
 
-async function selectMovieToWatch(movie) {
+async function selectMovieToWatch(movie, resumeSeconds) {
   enterWatching(
-    { kind: 'movie', title: movie.title, year: movie.year, image_url: movie.image_url },
-    { backTarget: 'movie-details', crumbTitle: movie.title, metaHtml: `<h1>${movie.title}</h1>` }
+    { kind: 'movie', title: movie.title, year: movie.year, image_url: movie.image_url, resumeSeconds },
+    { backTarget: 'movie-details', crumbTitle: movie.title, title: movie.title }
   );
+  document.getElementById('watch-episodes').classList.add('hidden');
+  renderWatchPosterCard({
+    title: movie.title,
+    imageUrl: movie.image_url,
+    rating: movie.rating ? movie.rating.toFixed(1) : '',
+    metaLine: [movie.year, 'Movie'].filter(Boolean).join(' · '),
+    genres: movie.genres,
+  });
+  if (movie.tmdb_id) loadWatchMediaRecs('movie', movie.tmdb_id, selectMovie);
+  else renderWatchRecs([], null, null);
   // Dub/language picking is MovieBox-specific machinery, but MovieBox is
-  // always one of the merged sources now, so this always runs.
-  const subjectId = await prepareMovieboxSubject(movie.title, movie.year).catch(() => undefined);
+  // always one of the merged sources now, so this always runs. null (not
+  // undefined) specifically means "MovieBox search just failed" — see
+  // loadStreamOptions, which uses that to skip a second, identical,
+  // guaranteed-to-fail MovieBox attempt instead of quietly re-running it.
+  const subjectId = await prepareMovieboxSubject(movie.title, movie.year).catch(() => null);
   loadStreamOptions(movie.title, 0, 0, subjectId, movie.year);
 }
 
@@ -1601,19 +1911,36 @@ async function selectMovieToWatch(movie) {
 // too, not just the episode it resumed. Without threading it through goTo,
 // each Next Episode click rebuilds this page via a plain selectSeriesEpisodeToWatch
 // call with no override, which used to silently reset Back to Series Details.
-async function selectSeriesEpisodeToWatch(series, season, episode, episodeNumbers, backOverride) {
+async function selectSeriesEpisodeToWatch(series, season, episode, episodeNumbers, backOverride, resumeSeconds) {
   const goTo = (num) => selectSeriesEpisodeToWatch(series, season, num, episodeNumbers, backOverride);
   const nav = episodeNumbers ? buildEpisodeNav(episodeNumbers, episode, goTo) : sequentialNav(episode, goTo);
   enterWatching(
-    { kind: 'series', title: series.title, season, episode, year: series.year, tmdb_id: series.tmdb_id, image_url: series.image_url },
+    { kind: 'series', title: series.title, season, episode, year: series.year, tmdb_id: series.tmdb_id, image_url: series.image_url, resumeSeconds },
     {
       backTarget: backOverride?.target || 'series-details',
       crumbTitle: backOverride?.label || series.title,
-      metaHtml: `<span class="tag">Season ${season} · Episode ${episode}</span><h1>${series.title}</h1>`,
+      kicker: `Season ${season} · Episode ${episode}`,
+      title: series.title,
       nav,
     }
   );
-  const subjectId = await prepareMovieboxSubject(series.title, series.year).catch(() => undefined);
+  const jumpTo = (seasonNum, num) => selectSeriesEpisodeToWatch(series, seasonNum, num, undefined, backOverride);
+  if (series.tmdb_id) {
+    renderSeriesEpisodeStrip(series, season, episode, jumpTo);
+    loadWatchMediaRecs('tv', series.tmdb_id, selectSeries);
+  } else {
+    document.getElementById('watch-episodes').classList.add('hidden');
+    renderWatchRecs([], null, null);
+  }
+  renderWatchPosterCard({
+    title: series.title,
+    imageUrl: series.image_url,
+    rating: series.rating ? series.rating.toFixed(1) : '',
+    metaLine: [series.year, 'Series'].filter(Boolean).join(' · '),
+    genres: series.genres,
+  });
+  // null vs undefined: see selectMovieToWatch's identical line.
+  const subjectId = await prepareMovieboxSubject(series.title, series.year).catch(() => null);
   loadStreamOptions(series.title, season, episode, subjectId, series.year);
 }
 
@@ -1622,12 +1949,16 @@ async function selectSeriesEpisodeToWatch(series, season, episode, episodeNumber
 // the same show doesn't re-resolve every time — a different title always does.
 let currentAnimeResolution = null; // { title, query, index, episodes }
 
+// A null result (provider reachable, genuinely no matching title) and a
+// thrown error (provider unreachable/down/blocked — see curl_impersonate_get
+// in anidb.rs) used to both collapse into the same generic "not found"
+// message here, which misreports a site outage as "this title doesn't
+// exist". Only null is handled here now; a real error is left to propagate
+// to startPlayback's own catch, same as every other real failure in that
+// function, so the actual reason reaches the user.
 async function resolveAnimeForPlayback(title, expectedEpisodes, isReleasing) {
   if (currentAnimeResolution && currentAnimeResolution.title === title) return currentAnimeResolution;
-  const resolved = await api.resolveAnime(title, expectedEpisodes, isReleasing).catch((e) => {
-    console.error('resolve_anime error', e);
-    return null;
-  });
+  const resolved = await api.resolveAnime(title, expectedEpisodes, isReleasing);
   if (!resolved) return null;
   currentAnimeResolution = { title, ...resolved };
   return currentAnimeResolution;
@@ -1635,18 +1966,22 @@ async function resolveAnimeForPlayback(title, expectedEpisodes, isReleasing) {
 
 async function startPlayback() {
   if (!pendingPlay) return;
-  const statusEl = document.getElementById('player-status');
-  statusEl.style.color = '';
+  // play-btn is only disabled while sources are loading (see
+  // loadStreamOptions) — reuse that same flag as a re-entrancy guard so a
+  // fast double-click can't fire two watch_episode/play_stream calls (two
+  // mpv windows racing) while the first one is still awaiting.
+  const playBtn = document.getElementById('play-btn');
+  if (playBtn.disabled) return;
+  playBtn.disabled = true;
 
   try {
     if (pendingPlay.kind === 'anime') {
       const { anime, episodeNum } = pendingPlay;
       const quality = getSelectedQuality();
-      statusEl.textContent = 'Resolving...';
+      setPlayerStatus('Resolving...');
       const resolved = await resolveAnimeForPlayback(anime.title, anime.episodes, anime.status === 'Currently airing');
       if (!resolved) {
-        statusEl.style.color = '#ef4444';
-        statusEl.textContent = `Could not find "${anime.title}" — ani-cli's source doesn't have a match.`;
+        setPlayerStatus(`Could not find "${anime.title}" — ani-cli's source doesn't have a match.`, { error: true });
         return;
       }
       // A known AniList episode count means the button clicked was local
@@ -1660,22 +1995,27 @@ async function startPlayback() {
         const real = resolved.episodes[Number(episodeNum) - 1];
         if (real) realEpisode = real.number;
       }
-      statusEl.textContent = `Loading Episode ${episodeNum}...`;
+      setPlayerStatus(`Loading Episode ${episodeNum}...`);
       const result = await api.watchEpisode(resolved.query, resolved.index, realEpisode, quality);
-      statusEl.innerHTML = `<strong>Episode ${episodeNum}</strong><br/>${result}`;
+      setPlayerStatus(`<strong>Episode ${episodeNum}</strong><br/>${result}`, { html: true });
       // Store the real (already-resolved) number so a future resume plays
       // the same episode directly without needing to re-map anything.
       saveContinueWatching({ id: anime.title, kind: 'anime', title: anime.title, episode: realEpisode, quality, status: anime.status, image_url: anime.image_url });
     } else if (pendingPlay.kind === 'movie' || pendingPlay.kind === 'series') {
       const option = getSelectedStreamOption();
       if (!option) {
-        statusEl.textContent = 'No source selected';
+        setPlayerStatus('No source selected');
         return;
       }
       const windowTitle = pendingPlay.kind === 'movie'
         ? pendingPlay.title
         : `${pendingPlay.title} S${pendingPlay.season}E${pendingPlay.episode}`;
-      statusEl.textContent = 'Starting playback...';
+      // Shared with saveContinueWatching below and threaded into the play calls
+      // so the eventual playback-progress event (see initPlaybackProgressEvents)
+      // can be matched back to this exact entry even if the user has since
+      // navigated elsewhere by the time mpv actually closes.
+      const watchId = pendingPlay.kind === 'movie' ? `movie:${pendingPlay.title}` : `series:${pendingPlay.title}`;
+      setPlayerStatus('Starting playback...');
       // 4KHDHub's resource_link is a mirror page, not a direct video URL —
       // play_fourk_stream resolves the real link (and any headers it needs)
       // first. Its mirrors are third-party hosts that go down independently
@@ -1685,12 +2025,14 @@ async function startPlayback() {
         opt.fourk_release
           ? api.playFourkStream(
               [opt.fourk_release, ...currentStreamOptions.filter((o) => o !== opt && o.fourk_release).map((o) => o.fourk_release)],
-              windowTitle
+              windowTitle,
+              pendingPlay.resumeSeconds,
+              watchId
             )
-          : api.playStream(opt.resource_link, windowTitle, opt.subject_id, opt.resource_id);
+          : api.playStream(opt.resource_link, windowTitle, opt.subject_id, opt.resource_id, pendingPlay.resumeSeconds, watchId);
 
       try {
-        statusEl.textContent = await playViaOption(option);
+        setPlayerStatus(await playViaOption(option));
       } catch (primaryError) {
         // The chosen option's own mirrors are exhausted — that's usually a
         // provider-wide issue (a scraper heuristic broken by a site change,
@@ -1700,16 +2042,31 @@ async function startPlayback() {
         // end — fall back to the other one before giving up.
         const fallbackOption = currentStreamOptions.find((o) => Boolean(o.fourk_release) !== Boolean(option.fourk_release));
         if (!fallbackOption) throw primaryError;
-        statusEl.textContent = `${sourceLabel(option)} failed, trying ${sourceLabel(fallbackOption)}...`;
-        statusEl.textContent = await playViaOption(fallbackOption);
+        setPlayerStatus(`${sourceLabel(option)} failed, trying ${sourceLabel(fallbackOption)}...`);
+        setPlayerStatus(await playViaOption(fallbackOption));
       }
       // id is kind-prefixed (unlike the bare-title anime id above) so a movie
       // and an anime that happen to share a title don't overwrite each other.
+      // saveContinueWatching replaces the whole entry, so without this a
+      // fresh entry built here would wipe out any position/duration a prior
+      // session already saved — and if mpv is later killed abruptly (or the
+      // user navigates away before it exits cleanly) that wipe is never
+      // overwritten with real data, permanently losing the progress bar. A
+      // movie has no episode to mismatch, so its progress is always carried
+      // forward; a series' watch_id has no season/episode in it, so its
+      // progress is only carried forward when it's still describing the same
+      // episode that's about to be saved.
+      const prevEntry = getContinueWatching().find((e) => e.id === watchId);
+      const keepProgress = prevEntry && (pendingPlay.kind === 'movie'
+        || (prevEntry.season === pendingPlay.season && prevEntry.episode === pendingPlay.episode));
+      const progress = keepProgress
+        ? { positionSeconds: prevEntry.positionSeconds, durationSeconds: prevEntry.durationSeconds }
+        : {};
       saveContinueWatching(
         pendingPlay.kind === 'movie'
-          ? { id: `movie:${pendingPlay.title}`, kind: 'movie', title: pendingPlay.title, year: pendingPlay.year, image_url: pendingPlay.image_url }
+          ? { id: watchId, kind: 'movie', title: pendingPlay.title, year: pendingPlay.year, image_url: pendingPlay.image_url, ...progress }
           : {
-              id: `series:${pendingPlay.title}`,
+              id: watchId,
               kind: 'series',
               title: pendingPlay.title,
               year: pendingPlay.year,
@@ -1717,12 +2074,14 @@ async function startPlayback() {
               episode: pendingPlay.episode,
               tmdb_id: pendingPlay.tmdb_id,
               image_url: pendingPlay.image_url,
+              ...progress,
             }
       );
     }
   } catch (e) {
-    statusEl.style.color = '#ef4444';
-    statusEl.textContent = `Error: ${e}`;
+    setPlayerStatus(`Error: ${e}`, { error: true });
+  } finally {
+    playBtn.disabled = false;
   }
 }
 
@@ -1865,16 +2224,19 @@ function initSlideNav() {
   });
 }
 
-function initAniCliUpdate() {
-  const btn = document.getElementById('update-ani-cli-btn');
-  const status = document.getElementById('update-ani-cli-status');
-
+// Shared shape behind every Settings-page "click button, run an async
+// backend action, show its result as status text" control (ani-cli update,
+// moviebox-tui update, clear downloads) — was hand-copied at each call site.
+function wireActionButton(btnId, statusId, loadingText, action, onSuccess) {
+  const btn = document.getElementById(btnId);
+  const status = document.getElementById(statusId);
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     status.classList.remove('error');
-    status.textContent = 'Checking for update...';
+    status.textContent = loadingText;
     try {
-      status.textContent = await api.updateAniCli();
+      status.textContent = await action();
+      if (onSuccess) onSuccess();
     } catch (e) {
       status.classList.add('error');
       status.textContent = e;
@@ -1882,6 +2244,27 @@ function initAniCliUpdate() {
       btn.disabled = false;
     }
   });
+}
+
+function initAniCliUpdate() {
+  // Best-effort: ani-cli isn't found on PATH until it's actually installed,
+  // so a lookup failure here just leaves the version tag blank rather than
+  // surfacing as an error (the update button below already reports that).
+  api.getAniCliVersion().then((v) => {
+    document.getElementById('ani-cli-version').textContent = `v${v}`;
+  }).catch(() => {});
+
+  wireActionButton('update-ani-cli-btn', 'update-ani-cli-status', 'Checking for update...', api.updateAniCli);
+}
+
+function initMovieboxTuiUpdate() {
+  // Compiled into this binary at build time (see build.rs) — always
+  // available, no network/PATH lookup involved, unlike ani-cli's version.
+  api.getMovieboxTuiVersion().then((v) => {
+    document.getElementById('moviebox-tui-version').textContent = `v${v}`;
+  }).catch(() => {});
+
+  wireActionButton('update-moviebox-tui-btn', 'update-moviebox-tui-status', 'Fetching latest version...', api.updateMovieboxTui);
 }
 
 function initTmdbKey() {
@@ -1892,6 +2275,15 @@ function initTmdbKey() {
   document.getElementById('tmdb-key-save-btn').addEventListener('click', () => {
     setTmdbKey(input.value);
     status.textContent = input.value.trim() ? 'Saved.' : 'Cleared.';
+    // loadGenreRows has no retry button (unlike Trending/Spotlight) and its
+    // only caller (loadMoviesTab/loadSeriesTab) runs once per session — so a
+    // key entered after visiting Movies/Series would otherwise leave those
+    // genre rows permanently empty for the rest of the session. Re-running it
+    // here is idempotent (rebuilds its container from scratch either way).
+    if (input.value.trim()) {
+      loadGenreRows('movie', 'movie-genre-rows', 'movie-genre-filter', 'movie-year-filter', 'movie-search-results', selectMovie);
+      loadGenreRows('tv', 'series-genre-rows', 'series-genre-filter', 'series-year-filter', 'series-search-results', selectSeries);
+    }
   });
 }
 
@@ -1911,22 +2303,7 @@ async function refreshDownloadsInfo() {
 
 function initDownloadsSettings() {
   refreshDownloadsInfo();
-  const btn = document.getElementById('clear-downloads-btn');
-  const status = document.getElementById('clear-downloads-status');
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    status.classList.remove('error');
-    status.textContent = 'Clearing...';
-    try {
-      status.textContent = await api.clearDownloads();
-      refreshDownloadsInfo();
-    } catch (e) {
-      status.classList.add('error');
-      status.textContent = e;
-    } finally {
-      btn.disabled = false;
-    }
-  });
+  wireActionButton('clear-downloads-btn', 'clear-downloads-status', 'Clearing...', api.clearDownloads, refreshDownloadsInfo);
 }
 
 // Wishlist, continue-watching, and preferences — deliberately not the TMDB
@@ -2038,6 +2415,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initKeyboardActivation();
   initSlideNav();
   initAniCliUpdate();
+  initMovieboxTuiUpdate();
   initTmdbKey();
   initThemeToggle();
   initCommandPalette();
@@ -2048,6 +2426,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initWatchLanguageSelect();
   initPlaybackMemory();
   initDownloadEvents();
+  initPlaybackProgressEvents();
   initDownloadsSettings();
   initBackup();
   initNotifications();

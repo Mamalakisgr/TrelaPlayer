@@ -1,0 +1,26 @@
+name: Windows Installer Validation
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [ main ]
+
+jobs:
+  validate-installer:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PowerShell Execution Policy
+        run: |
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force
+        shell: pwsh
+
+      - name: Run installer (dry-run)
+        env:
+          INSTALL_DRY_RUN: '1'
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -Auto
+        shell: pwsh

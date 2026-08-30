@@ -265,6 +265,8 @@ pub async fn get_season_episodes(tmdb_id: u64, season_number: u32, api_key: &str
             Some(TvEpisode {
                 episode_number: e["episode_number"].as_u64()? as u32,
                 name: e["name"].as_str().unwrap_or("").to_string(),
+                still_url: e["still_path"].as_str().map(|p| format!("{}{}", IMAGE_BASE, p)),
+                runtime: e["runtime"].as_u64().map(|r| r as u32),
             })
         })
         .collect())

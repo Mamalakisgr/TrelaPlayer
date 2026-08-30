@@ -2,29 +2,37 @@ use crate::models::{Episode, ResolvedAnime};
 use crate::procutil::find_exe;
 use std::process::Command;
 
-// ani-cli itself searches anidb.app (it switched providers upstream from
-// AllAnime). AniList — used for all of trela's own anime browsing/metadata —
-// models each season/cour of a show as its own entry with its own 1..N
-// episode count, but anidb.app doesn't always agree: the same show can be a
-// single listing with GLOBAL episode numbers across every season (season 6
-// episode 1 is really "episode 111"), or split into multiple overlapping
-// listings where a blind top search match lands on the wrong one entirely.
-// Trusting ani-cli's own `-S 1` on an AniList title without checking either
-// of those is exactly what causes "wrong show" or "right show, wrong
-// episode" — this exists purely to catch that at watch time, one lookup per
-// title, right before actually invoking ani-cli. It is NOT a general
-// search/browse backend; Browse/Home/search stay AniList-only.
-const BASE_URL: &str = "https://anidb.app";
+// ani-cli itself searches hianime.at (as of ani-cli 5.1.1 — it has already
+// switched providers twice before this: AllAnime -> anidb.app -> hianime.at,
+// so this module's URL/parsing is tied to whatever ani-cli's own upstream
+// script currently does, not a stable API contract; check
+// https://github.com/pystardust/ani-cli/blob/master/ani-cli's search_api /
+// episodes_api if this starts erroring again). AniList — used for all of
+// trela's own anime browsing/metadata — models each season/cour of a show as
+// its own entry with its own 1..N episode count, but the scraped provider
+// doesn't always agree: the same show can be a single listing with GLOBAL
+// episode numbers across every season (season 6 episode 1 is really "episode
+// 111"), or split into multiple overlapping listings where a blind top
+// search match lands on the wrong one entirely. Trusting ani-cli's own `-S 1`
+// on an AniList title without checking either of those is exactly what
+// causes "wrong show" or "right show, wrong episode" — this exists purely to
+// catch that at watch time, one lookup per title, right before actually
+// invoking ani-cli. It is NOT a general search/browse backend; Browse/Home/
+// search stay AniList-only.
+const BASE_URL: &str = "https://hianime.at";
 
 fn curl_impersonate_path() -> String {
     find_exe(&["curl-impersonate.exe", "curl-impersonate"]).unwrap_or_else(|| "curl-impersonate.exe".to_string())
 }
 
-// anidb.app sits behind a Cloudflare managed challenge that blocks plain HTTP
-// clients outright — this is exactly why ani-cli itself requires
-// curl-impersonate (see its dep_ch_failover "curl_firefox135,curl_chrome136,
-// curl_chrome116,..." list). Same cipher/header/HTTP2 fingerprint as ani-cli's
-// own curl_chrome116 wrapper, verified working directly against anidb.app.
+// The scraped provider can sit behind a Cloudflare managed challenge that
+// blocks plain HTTP clients outright — this is the same reason ani-cli itself
+// carries a curl-impersonate fallback (see its dep_ch_failover
+// "curl_firefox135,curl_chrome136,curl_chrome116,..." list) for whichever
+// site it's currently pointed at. Same cipher/header/HTTP2 fingerprint as
+// ani-cli's own curl_chrome116 wrapper — a generic real-Chrome fingerprint,
+// not tied to any one site, so it keeps working across ani-cli's provider
+// switches without needing to change.
 fn curl_impersonate_get(url: &str) -> Result<String, String> {
     let path = curl_impersonate_path();
     let output = Command::new(&path)
@@ -71,48 +79,70 @@ fn curl_impersonate_get(url: &str) -> Result<String, String> {
             "--tls-grease",
             "--tls-signed-cert-timestamps",
             "-sL",
+            "-w",
+            "\n%{http_code}",
             url,
         ])
         .output()
         .map_err(|e| {
             format!(
-                "Failed to run curl-impersonate ({}): {}. anidb.app (what ani-cli itself searches) requires \
+                "Failed to run curl-impersonate ({}): {}. {} (what ani-cli itself searches) requires \
                  curl-impersonate to get past Cloudflare — the same tool ani-cli needs for this exact reason.",
-                path, e
+                path, e, BASE_URL
             )
         })?;
 
     if !output.status.success() {
         return Err(format!("curl-impersonate exited with status {}", output.status));
     }
-    let body = String::from_utf8_lossy(&output.stdout).into_owned();
+    // curl (no -f/--fail passed) exits 0 even on a 5xx/4xx HTTP response —
+    // verified directly against anidb.app while it was down for maintenance
+    // (same failure mode applies to whatever site BASE_URL currently points
+    // at): curl's own process succeeds, and the maintenance page's HTML used
+    // to get parsed as a normal (empty) search result, silently misreporting
+    // a site outage as "no match found". -w appends the real status code
+    // after the body so that case can be told apart from a genuine empty
+    // result.
+    let raw = String::from_utf8_lossy(&output.stdout).into_owned();
+    let (body, status) = raw.rsplit_once('\n').unwrap_or((raw.as_str(), ""));
     if body.contains("Just a moment") {
-        return Err("Blocked by Cloudflare (anidb.app). Try updating curl-impersonate.".to_string());
+        return Err(format!("Blocked by Cloudflare ({}). Try updating curl-impersonate.", BASE_URL));
     }
-    Ok(body)
+    if !status.trim().starts_with('2') {
+        return Err(format!(
+            "{} returned HTTP {} — it looks like it's down or under maintenance right now, not that the title doesn't exist. Try again later.",
+            BASE_URL, status.trim()
+        ));
+    }
+    Ok(body.to_string())
 }
 
 fn html_unescape(s: &str) -> String {
     s.replace("&#039;", "'").replace("&quot;", "\"").replace("&amp;", "&")
 }
 
-// Anime cards look like:
-// <a href="https://anidb.app/anime/<slug>-<id>" class="anime-card ..." title="<Title>">
-// Extracted with plain string scanning (matching ani-cli's own sed-based
-// approach) rather than pulling in a full HTML parser for one pattern.
+// Search result cards look like:
+// <div class="film-detail">...<h3 class="film-name"><a href="/watch/<slug>-<id>" title="<Title>">...
+// (mirrors ani-cli's own hianime_search: split on film-detail blocks, then
+// within each block require the <a href> to be the one immediately following
+// <h3 class="film-name">, matching the plain string-scanning approach already
+// used here rather than pulling in a full HTML parser for one pattern.)
 fn parse_search_results(html: &str) -> Vec<(String, String)> {
+    // Everything from the sidebar onward is unrelated page furniture, not
+    // search results — mirrors ani-cli's own `sed '/id="main-sidebar"/,$d'`.
+    let html = html.split("id=\"main-sidebar\"").next().unwrap_or(html);
     let mut results = Vec::new();
-    for chunk in html.split("<a href=\"").skip(1) {
-        let Some(url_end) = chunk.find('"') else { continue };
-        let href = &chunk[..url_end];
-        let Some(slug_id) = href.rsplit("/anime/").next() else { continue };
-        if slug_id == href {
-            continue; // no "/anime/" in this href — not an anime card
-        }
-        let Some(title_start) = chunk.find("title=\"").map(|i| i + "title=\"".len()) else { continue };
-        let Some(title_len) = chunk[title_start..].find('"') else { continue };
-        let title = html_unescape(&chunk[title_start..title_start + title_len]);
-        results.push((slug_id.to_string(), title));
+    for chunk in html.split("<div class=\"film-detail\">").skip(1) {
+        let Some(after_h3) = chunk.split_once("<h3 class=\"film-name\">").map(|(_, rest)| rest) else { continue };
+        let Some(after_href_marker) = after_h3.split_once("<a href=\"").map(|(_, rest)| rest) else { continue };
+        let Some((href, after_href)) = after_href_marker.split_once('"') else { continue };
+        // The trailing path segment (after the last '/') is the anime "id"
+        // ani-cli itself threads through to the episodes API and the
+        // eventual `/watch/<id>?ep=...` URLs — e.g. "one-piece-100".
+        let Some(slug_id) = href.rsplit('/').next().filter(|s| !s.is_empty()) else { continue };
+        let Some(after_title_marker) = after_href.split_once("title=\"").map(|(_, rest)| rest) else { continue };
+        let Some((title, _)) = after_title_marker.split_once('"') else { continue };
+        results.push((slug_id.to_string(), html_unescape(title)));
     }
     results
 }
@@ -122,27 +152,36 @@ fn search_anime(query: &str) -> Result<Vec<(String, String)>, String> {
     if normalized_query.is_empty() {
         return Ok(Vec::new());
     }
-    let html = curl_impersonate_get(&format!("{}/browse?q={}", BASE_URL, normalized_query))?;
+    let html = curl_impersonate_get(&format!("{}/search?keyword={}", BASE_URL, normalized_query))?;
     Ok(parse_search_results(&html))
+}
+
+// The response is JSON with the episode list markup embedded as an escaped
+// string field. Dropping every backslash turns \" and \/ back into plain "
+// and / (same as ani-cli's own `sed 's|\\||g'`), leaving ordinary
+// <a class="ep-item" ... data-number="N" ...> markup that the same plain
+// string-scanning approach as parse_search_results can read — only "number"
+// is needed here, episode ids play no role in Trela's own playback path
+// (that's ani-cli's job, by real episode number). Verified against a live
+// 1177-episode response (One Piece) — every ep-item's data-number comes
+// through with no gaps or duplicates.
+fn parse_episode_html(raw: &str) -> Vec<Episode> {
+    let unescaped = raw.replace('\\', "");
+    let mut episodes = Vec::new();
+    for chunk in unescaped.split("ep-item").skip(1) {
+        let Some(after_marker) = chunk.split_once("data-number=\"").map(|(_, rest)| rest) else { continue };
+        let Some((number, _)) = after_marker.split_once('"') else { continue };
+        episodes.push(Episode { title: format!("Episode {}", number), number: number.to_string() });
+    }
+    episodes
 }
 
 fn get_episodes(anime_id: &str) -> Result<Vec<Episode>, String> {
     // anime_id is the full "<slug>-<numericId>" string search_anime returned;
     // the episodes API wants just the trailing numeric id.
     let numeric_id = anime_id.rsplit('-').next().unwrap_or(anime_id);
-    let json = curl_impersonate_get(&format!("{}/api/frontend/anime/{}/episodes", BASE_URL, numeric_id))?;
-    let parsed: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("Failed to parse episode list: {}", e))?;
-
-    Ok(parsed["episodes"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|e| {
-            let number = e["number"].as_u64()?.to_string();
-            Some(Episode { title: format!("Episode {}", number), number })
-        })
-        .collect())
+    let raw = curl_impersonate_get(&format!("{}/api/theme/episode/list/{}", BASE_URL, numeric_id))?;
+    Ok(parse_episode_html(&raw))
 }
 
 fn max_episode_number(episodes: &[Episode]) -> u64 {
@@ -150,18 +189,18 @@ fn max_episode_number(episodes: &[Episode]) -> u64 {
 }
 
 // A romaji arc/season subtitle from AniList doesn't necessarily textually
-// resemble anidb.app's English title for the same entry at all, so search
-// relevance alone can't be trusted to put the right season/cour first. The
-// AniList-reported episode count is a much more reliable disambiguator —
-// each *finished* season/cour usually has a distinct, stable count — so this
-// tries candidates in relevance order and prefers whichever one's real
-// episode list actually matches that count.
+// resemble the scraped provider's English title for the same entry at all,
+// so search relevance alone can't be trusted to put the right season/cour
+// first. The AniList-reported episode count is a much more reliable
+// disambiguator — each *finished* season/cour usually has a distinct, stable
+// count — so this tries candidates in relevance order and prefers whichever
+// one's real episode list actually matches that count.
 //
 // That exact match only works once a season is done airing, though: for a
 // RELEASING (still-airing) entry, AniList reports the season's planned total
 // episode count, not how many have actually aired yet — e.g. Bleach's
-// "The Calamity" cour was listed as 10 planned episodes on AniList while
-// anidb.app only had the 3 that had aired so far (numbered 41-43, continuing
+// "The Calamity" cour was listed as 10 planned episodes on AniList while the
+// provider only had the 3 that had aired so far (numbered 41-43, continuing
 // the show's global numbering from the previous cour). No count will ever
 // exactly match mid-season, so for RELEASING titles the tiebreaker instead
 // is which candidate's episodes are the most recent continuation of the
@@ -220,4 +259,71 @@ pub async fn resolve_anime(title: String, expected_episodes: Option<u32>, is_rel
     tokio::task::spawn_blocking(move || resolve_anime_blocking(title, expected_episodes, is_releasing))
         .await
         .map_err(|e| format!("Internal error resolving anime: {}", e))?
+}
+
+#[cfg(test)]
+mod hianime_parsing_tests {
+    // Fixtures below are hand-trimmed excerpts modeled on real hianime.at
+    // responses (fetched and verified against these exact parsers, including
+    // a full 1177-episode live response, while porting this module off
+    // anidb.app). Kept small/embedded so the tests are self-contained rather
+    // than depending on live network access or files outside the repo.
+    use super::*;
+
+    const SEARCH_FIXTURE: &str = r#"
+        <div class="film-detail">
+            <h3 class="film-name">
+                <a href="https://hianime.at/one-piece-1"
+                    title="One Piece"
+                    class="dynamic-name"
+                    data-jname="One Piece">
+                    One Piece
+                </a>
+            </h3>
+            <div class="description">Gold Roger was known as the &quot;Pirate King&quot;...</div>
+        </div>
+        <div class="film-detail">
+            <h3 class="film-name">
+                <a href="https://hianime.at/one-piece-the-movie-4164"
+                    title="One Piece Movie 1"
+                    class="dynamic-name"
+                    data-jname="One Piece Movie 1">
+                    One Piece Movie 1
+                </a>
+            </h3>
+        </div>
+        <div id="main-sidebar">
+            <div class="film-detail">
+                <h3 class="film-name">
+                    <a href="https://hianime.at/some-recommended-show-9"
+                        title="Should Be Excluded">Should Be Excluded</a>
+                </h3>
+            </div>
+        </div>
+    "#;
+
+    #[test]
+    fn parses_search_cards_and_stops_at_sidebar() {
+        let results = parse_search_results(SEARCH_FIXTURE);
+        assert_eq!(
+            results,
+            vec![
+                ("one-piece-1".to_string(), "One Piece".to_string()),
+                ("one-piece-the-movie-4164".to_string(), "One Piece Movie 1".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn episode_html_extracts_numbers_from_json_escaped_markup() {
+        // Mirrors the real /api/theme/episode/list/<id> shape: JSON with the
+        // episode markup embedded as an escaped "html" string field, real
+        // attribute order (title, class="... ep-item", data-number, data-id,
+        // href) confirmed against a live 1177-episode response.
+        let raw = r#"{"status":true,"html":"<a title=\"Episode 1\" class=\"ssl-item ep-item\" data-number=\"1\" data-id=\"1\" href=\"\/watch\/one-piece-1?ep=1\"><\/a><a title=\"Episode 2\" class=\"ssl-item ep-item\" data-number=\"2\" data-id=\"2\" href=\"\/watch\/one-piece-1?ep=2\"><\/a>"}"#;
+        let episodes = parse_episode_html(raw);
+        assert_eq!(episodes.len(), 2);
+        assert_eq!(episodes[0].number, "1");
+        assert_eq!(episodes[1].number, "2");
+    }
 }

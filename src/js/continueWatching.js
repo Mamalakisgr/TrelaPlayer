@@ -1,23 +1,21 @@
-import { readJson } from './storage.js';
+import { listStore } from './storage.js';
 
-const STORAGE_KEY = 'trela_continue_watching';
-const MAX_ENTRIES = 10;
+const store = listStore('trela_continue_watching', { max: 10 });
 
-export function getContinueWatching() {
-  const list = readJson(STORAGE_KEY, []);
-  return Array.isArray(list) ? list : [];
-}
+export const getContinueWatching = store.getAll;
 
 // entry: { id, kind: 'anime'|'movie'|'series', title, episode, season, quality, year, image_url }
 // (season/quality only apply to some kinds; missing `kind` on old stored entries means 'anime';
 // entries saved before image_url existed just render without a poster)
-export function saveContinueWatching(entry) {
-  const list = getContinueWatching().filter((e) => e.id !== entry.id);
-  list.unshift({ ...entry, updatedAt: Date.now() });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0, MAX_ENTRIES)));
-}
+export const saveContinueWatching = (entry) => store.upsert(entry, 'updatedAt');
+export const removeContinueWatching = store.remove;
 
-export function removeContinueWatching(id) {
-  const list = getContinueWatching().filter((e) => e.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+// Called when mpv reports how far playback actually got (see the
+// playback-progress event in main.js) — merges into the existing entry
+// without touching its other fields, and no-ops if the entry was removed
+// (e.g. the user cleared it) while still watching.
+export function updateContinueWatchingProgress(id, positionSeconds, durationSeconds) {
+  const existing = getContinueWatching().find((e) => e.id === id);
+  if (!existing) return;
+  store.upsert({ ...existing, positionSeconds, durationSeconds }, 'updatedAt');
 }

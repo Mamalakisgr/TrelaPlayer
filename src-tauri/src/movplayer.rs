@@ -167,14 +167,27 @@ async fn fetch_episode_resources(
             let subject_id = subject_id.to_string();
             tokio::spawn(async move {
                 let mut items = Vec::new();
+                // A second (or third) encode of the same episode at this same
+                // resolution — e.g. two separate uploads — can land a page
+                // apart rather than sharing one page. Stopping the instant the
+                // *first* match appears would silently drop the later ones, so
+                // once a match streak starts this keeps paging through it and
+                // only stops at the first page that breaks the streak (or when
+                // there's genuinely nothing more).
+                let mut found_any = false;
                 for page in 1..=60 {
                     let Ok((page_items, pager)) = client.fetch_resource_page(&subject_id, resolution, page).await else { break };
                     let has_more = pager["hasMore"].as_bool().unwrap_or(false);
-                    let found = page_items
+                    let found_this_page = page_items
                         .iter()
                         .any(|item| item["se"].as_u64() == Some(season as u64) && item["ep"].as_u64() == Some(episode as u64));
                     items.extend(page_items);
-                    if found || !has_more {
+                    if found_this_page {
+                        found_any = true;
+                    } else if found_any {
+                        break;
+                    }
+                    if !has_more {
                         break;
                     }
                 }
@@ -300,10 +313,23 @@ pub(crate) fn extract_stream_options(subject_id: &str, items: &[serde_json::Valu
                 resolution: item["resolution"].as_u64().unwrap_or(0),
                 codec: item["codecName"].as_str().unwrap_or("unknown").to_uppercase(),
                 size: format_size(item["size"].as_str().unwrap_or("0")),
-                uploader: item["uploadBy"].as_str().unwrap_or("Unknown").to_string(),
+                // moviebox-tui's releases_to_moviebox_json() hardcodes
+                // uploadBy to the literal string "4KHDHub" for every 4KHDHub
+                // release, so two different releases at the same
+                // resolution/codec are otherwise indistinguishable in the
+                // GUI. Its fileName does carry the real distinguishing part
+                // (the release-group tag), so prefer that for 4KHDHub items;
+                // MovieBox items have no fileName and keep using uploadBy.
+                uploader: item["fileName"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| item["uploadBy"].as_str())
+                    .unwrap_or("Unknown")
+                    .to_string(),
                 subject_id: subject_id.to_string(),
                 resource_id: item["resourceId"].as_str().unwrap_or("").to_string(),
                 fourk_release: item.get("_fourk_release").cloned(),
+                mirrors: item["sourceCount"].as_u64().unwrap_or(0) as u32,
             })
         })
         .collect();
@@ -340,9 +366,23 @@ async fn fetch_caption_urls(client: &MovieBoxClient, subject_id: &str, resource_
 // Every subtitle track gets its own --sub-file so mpv adds them all as
 // external sub tracks; mpv's own `j`/`J` cycles between them, so there's no
 // need for a subtitle picker in the GUI.
-fn spawn_mpv(app: &AppHandle, url: &str, window_title: &str, sub_files: &[String]) -> Result<(), String> {
+fn spawn_mpv(
+    app: &AppHandle,
+    url: &str,
+    window_title: &str,
+    sub_files: &[String],
+    start_seconds: Option<f64>,
+    watch_id: String,
+) -> Result<(), String> {
     let mut sidecar = app.shell().sidecar("mpv").map_err(|e| format!("Failed to resolve bundled mpv: {}", e))?;
     sidecar = sidecar.arg(format!("--force-media-title={}", window_title));
+    if let Some(start) = start_seconds {
+        sidecar = sidecar.arg(format!("--start={start}"));
+    }
+    let tracking = crate::mpv_progress::TrackingSetup::new();
+    if let Some(setup) = &tracking {
+        sidecar = sidecar.args(setup.mpv_args());
+    }
     if url.starts_with("http://") || url.starts_with("https://") {
         // mpv's default demuxer cache (150MiB forward / 50MiB back) is sized
         // for local files, not a multi-GB remote episode — that thin a
@@ -350,18 +390,28 @@ fn spawn_mpv(app: &AppHandle, url: &str, window_title: &str, sub_files: &[String
         // on underrun by default (--cache-pause), which is what actually
         // shows up as "slow"/stuttery playback. Also force caching on
         // explicitly rather than relying on mpv's own URL auto-detection.
-        sidecar = sidecar.args(["--cache=yes", "--demuxer-max-bytes=500MiB", "--demuxer-max-back-bytes=150MiB"]);
+        //
+        // Separately: a total file size being small (e.g. ~1.8GB) doesn't
+        // protect against a mid-stream stall — a third-party CDN/mirror
+        // dropping or hanging the connection looks identical to a freeze
+        // regardless of file size. mpv has no auto-reconnect by default, so
+        // that stall never recovers on its own; ffmpeg's own reconnect
+        // options (mpv's network demuxers run on ffmpeg) make it retry
+        // instead of hanging.
+        sidecar = sidecar.args([
+            "--cache=yes",
+            "--demuxer-max-bytes=500MiB",
+            "--demuxer-max-back-bytes=150MiB",
+            "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_at_eof=1,reconnect_delay_max=5",
+        ]);
     }
     for sub in sub_files {
         sidecar = sidecar.arg(format!("--sub-file={}", sub));
     }
     sidecar = sidecar.arg(url);
 
-    let (mut rx, _child) = sidecar.spawn().map_err(|e| format!("Failed to launch mpv: {}", e))?;
-    // The sidecar always pipes stdout/stderr; draining and discarding them
-    // (playback is fire-and-forget, nothing here needs mpv's output) avoids
-    // mpv blocking on a full pipe buffer during a long viewing session.
-    tauri::async_runtime::spawn(async move { while rx.recv().await.is_some() {} });
+    let (rx, _child) = sidecar.spawn().map_err(|e| format!("Failed to launch mpv: {}", e))?;
+    crate::mpv_progress::track(app.clone(), rx, tracking, watch_id);
     Ok(())
 }
 
@@ -421,10 +471,12 @@ pub async fn play_stream(
     window_title: String,
     subject_id: String,
     resource_id: String,
+    start_seconds: Option<f64>,
+    watch_id: String,
 ) -> Result<String, String> {
     let client = get_client().await?;
     let sub_files = fetch_caption_urls(&client, &subject_id, &resource_id).await;
-    spawn_mpv(&app, &resource_link, &window_title, &sub_files)?;
+    spawn_mpv(&app, &resource_link, &window_title, &sub_files, start_seconds, watch_id)?;
     Ok(format!("Playing \"{}\"", window_title))
 }
 
@@ -519,7 +571,8 @@ pub async fn start_download(
             Ok(DownloadOutcome::Completed { .. }) => {
                 let path = destination.to_string_lossy().into_owned();
                 let _ = app.emit("download-complete", DownloadCompleteEvent { path: path.clone() });
-                if let Err(e) = spawn_mpv(&app, &path, &window_title, &sub_files) {
+                let watch_id = if season == 0 && episode == 0 { format!("movie:{title}") } else { format!("series:{title}") };
+                if let Err(e) = spawn_mpv(&app, &path, &window_title, &sub_files, None, watch_id) {
                     let _ = app.emit("download-error", DownloadErrorEvent { message: e });
                 }
             }

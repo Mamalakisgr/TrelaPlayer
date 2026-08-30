@@ -298,63 +298,114 @@
           </section>
 
           <section id="view-watching" class="view hidden watching-page">
-            <button class="btn btn-ghost back-btn" data-back="details" id="watching-back-btn">&larr; Back to Details</button>
+            <div class="watch-body">
+              <div class="watch-main">
+                <button type="button" class="back-btn watch-back-link" data-back="details" id="watching-back-btn">&larr; Back</button>
 
-            <div id="watch-meta"></div>
-
-            <div id="player-info" class="player-info">
-              <button id="play-btn" type="button" class="player-play-circle" aria-label="Play"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
-              <p id="player-status">Ready to play</p>
-            </div>
-
-            <div class="watch-settings-wrap">
-              <button id="watch-settings-btn" type="button" class="btn btn-secondary" aria-haspopup="true" aria-expanded="false" aria-controls="watch-settings-popover">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                Playback settings
-              </button>
-              <div id="watch-settings-popover" class="stream-dropdown watch-settings-popover hidden">
-                <div class="watch-quality" id="quality-select-wrap">
-                  <span class="quality-label">Quality</span>
-                  <div class="seg" id="quality-seg">
-                    <label class="seg-opt"><input type="radio" name="quality" value="best" checked>Best</label>
-                    <label class="seg-opt"><input type="radio" name="quality" value="1080">1080p</label>
-                    <label class="seg-opt"><input type="radio" name="quality" value="720">720p</label>
-                    <label class="seg-opt"><input type="radio" name="quality" value="480">480p</label>
-                    <label class="seg-opt"><input type="radio" name="quality" value="360">360p</label>
-                    <label class="seg-opt"><input type="radio" name="quality" value="worst">Worst</label>
+                <div class="watch-player" id="watch-player">
+                  <div class="watch-player-glow" aria-hidden="true"></div>
+                  <div class="watch-player-launch">
+                    <button id="play-btn" type="button" class="player-play-circle" aria-label="Play in mpv" title="Play in mpv">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    </button>
+                    <div class="watch-status-line" id="watch-status-line">
+                      <span class="watch-status-dot" aria-hidden="true"></span>
+                      <p id="player-status">Ready to play</p>
+                    </div>
+                  </div>
+                  <div class="watch-player-bar">
+                    <div class="watch-player-info">
+                      <div class="watch-kicker-row hidden" id="watch-kicker-row">
+                        <span class="watch-kicker-bar" aria-hidden="true"></span>
+                        <span id="watch-kicker-text"></span>
+                      </div>
+                      <div class="watch-player-title" id="watch-title"></div>
+                      <div class="watch-player-meta" id="watch-player-meta"></div>
+                    </div>
+                    <div class="watch-player-nav" id="episode-nav">
+                      <button id="episode-prev-btn" type="button" class="watch-nav-btn">&#8249; Prev</button>
+                      <button id="episode-next-btn" type="button" class="watch-nav-btn">Next &#8250;</button>
+                    </div>
                   </div>
                 </div>
 
-                <div class="watch-quality hidden" id="watch-language-wrap">
-                  <span class="quality-label">Language</span>
-                  <select id="watch-language-select" class="input filter-select"></select>
+                <div class="watch-settings" id="watch-settings">
+                  <div class="watch-settings-header" id="watch-settings-header" role="button" tabindex="0" aria-expanded="false" aria-controls="watch-settings-body">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="watch-settings-gear" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <span class="watch-settings-label">Playback settings</span>
+                    <span class="watch-settings-summary" id="watch-settings-summary"></span>
+                    <span class="watch-settings-chevron" id="watch-settings-chevron">Change &#8964;</span>
+                  </div>
+                  <div class="watch-settings-body hidden" id="watch-settings-body">
+                    <div class="watch-field" id="quality-select-wrap">
+                      <span class="watch-field-label">Quality</span>
+                      <div class="seg" id="quality-seg">
+                        <label class="seg-opt"><input type="radio" name="quality" value="best" checked>Best</label>
+                        <label class="seg-opt"><input type="radio" name="quality" value="1080">1080p</label>
+                        <label class="seg-opt"><input type="radio" name="quality" value="720">720p</label>
+                        <label class="seg-opt"><input type="radio" name="quality" value="480">480p</label>
+                        <label class="seg-opt"><input type="radio" name="quality" value="360">360p</label>
+                        <label class="seg-opt"><input type="radio" name="quality" value="worst">Worst</label>
+                      </div>
+                    </div>
+
+                    <div class="watch-field hidden" id="stream-options-wrap">
+                      <span class="watch-field-label">Source</span>
+                      <select id="stream-options-seg" class="input"></select>
+                    </div>
+
+                    <div class="watch-field hidden" id="watch-language-wrap">
+                      <span class="watch-field-label">Language</span>
+                      <select id="watch-language-select" class="input"></select>
+                    </div>
+
+                    <div class="watch-field hidden" id="watch-subtitle-wrap">
+                      <span class="watch-field-label">Subtitle</span>
+                      <select id="watch-subtitle-select" class="input">
+                        <option value="">None</option>
+                      </select>
+                    </div>
+
+                    <div class="watch-field watch-field-wide hidden" id="download-wrap">
+                      <span class="watch-field-label">Won't stream?</span>
+                      <div class="download-row">
+                        <button id="download-btn" type="button" class="btn btn-secondary">&#8681; Download &amp; Play</button>
+                        <div class="download-progress hidden" id="download-progress-wrap">
+                          <div class="download-progress-bar"><div class="download-progress-fill" id="download-progress-fill"></div></div>
+                          <p class="download-progress-status" id="download-progress-status"></p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div class="watch-quality hidden" id="stream-options-wrap">
-                  <span class="quality-label">Source</span>
-                  <div class="seg" id="stream-options-seg"></div>
-                </div>
-
-                <div class="watch-quality hidden" id="watch-subtitle-wrap">
-                  <span class="quality-label">Subtitle</span>
-                  <select id="watch-subtitle-select" class="input filter-select">
-                    <option value="">None</option>
-                  </select>
+                <div class="watch-episodes hidden" id="watch-episodes">
+                  <div class="watch-episodes-header">
+                    <span class="sidebar-heading watch-episodes-heading">Episodes</span>
+                    <span class="watch-episodes-count hidden" id="watch-episodes-count"></span>
+                    <div class="watch-season-pills" id="watch-episodes-season-pills"></div>
+                  </div>
+                  <div class="watch-episode-track" id="watch-episode-track" role="list" aria-label="Episodes"></div>
                 </div>
               </div>
-            </div>
 
-            <div class="download-row hidden" id="download-wrap">
-              <button id="download-btn" type="button" class="btn btn-secondary">&#8681; Download &amp; Play</button>
-              <div class="download-progress hidden" id="download-progress-wrap">
-                <div class="download-progress-bar"><div class="download-progress-fill" id="download-progress-fill"></div></div>
-                <p class="download-progress-status" id="download-progress-status"></p>
+              <div class="watch-sidebar">
+                <div class="watch-poster-card">
+                  <div class="watch-poster-img" id="watch-poster-img">
+                    <span class="watch-rating-chip hidden" id="watch-rating-chip"></span>
+                  </div>
+                  <div class="watch-poster-body">
+                    <div class="watch-side-title" id="watch-side-title"></div>
+                    <div class="watch-side-meta" id="watch-side-meta"></div>
+                    <div class="watch-side-tags" id="watch-side-tags"></div>
+                  </div>
+                </div>
+
+                <div class="watch-recs hidden" id="watch-recs-section">
+                  <span class="sidebar-heading">More like this</span>
+                  <div class="watch-recs-list" id="watch-recs-list"></div>
+                </div>
               </div>
-            </div>
-
-            <div id="episode-nav" class="episode-nav hidden">
-              <button id="episode-prev-btn" type="button">&#8249; Previous Episode</button>
-              <button id="episode-next-btn" type="button">Next Episode &#8250;</button>
             </div>
           </section>
 
@@ -367,13 +418,24 @@
             </div>
 
             <div class="settings-section">
-              <h3 class="section-heading">ani-cli</h3>
+              <h3 class="section-heading">ani-cli <span id="ani-cli-version" class="version-tag"></span></h3>
               <p class="muted-block">
-                Trela uses ani-cli to resolve and play episodes. If playback stops working, anidb.app (what ani-cli
-                searches) may have changed something — updating ani-cli often fixes it once a new version ships.
+                Trela uses ani-cli to resolve and play episodes. If playback stops working, the site ani-cli
+                searches may have changed something — updating ani-cli often fixes it once a new version ships.
               </p>
               <button id="update-ani-cli-btn" type="button" class="btn btn-secondary">Check for ani-cli Update</button>
               <pre id="update-ani-cli-status" class="update-status"></pre>
+            </div>
+
+            <div class="settings-section">
+              <h3 class="section-heading">moviebox-tui <span id="moviebox-tui-version" class="version-tag"></span></h3>
+              <p class="muted-block">
+                Trela compiles the moviebox-tui crate directly in for MovieBox/4KHDHub playback — it's an actively
+                developed dependency, so this fetches the newest version into Cargo.lock. Only works from a source
+                checkout with cargo installed; rebuild and restart Trela afterward to actually run the new version.
+              </p>
+              <button id="update-moviebox-tui-btn" type="button" class="btn btn-secondary">Update moviebox-tui Dependency</button>
+              <pre id="update-moviebox-tui-status" class="update-status"></pre>
             </div>
 
             <div class="settings-section">

@@ -1,7 +1,9 @@
 use crate::models::StreamOption;
 use crate::movplayer::extract_stream_options;
-use moviebox_tui::providers::fourkhdhub::{releases_to_moviebox_json, FourKHdHubClient};
+use moviebox_tui::providers::fourkhdhub::FourKHdHubClient;
 use moviebox_tui::providers::models::{CatalogItem, MediaType, Release};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use tauri::AppHandle;
 use tauri_plugin_shell::ShellExt;
 
@@ -102,6 +104,23 @@ async fn search_candidates(client: &FourKHdHubClient, title: &str, expected_year
 // seen returning a completely unrelated show as its only result rather than
 // an empty list (see title_plausibly_matches), so "the best of what's left"
 // isn't a safe assumption the way it is on MovieBox.
+// A show's 4KHDHub item id doesn't change between episodes, but nothing
+// previously remembered it — every single episode click re-ran the full
+// search (a POST) plus up to 8 sequential candidate-page fetches from
+// scratch, even for the show already being watched. MovieBox avoids this via
+// the frontend caching subject_id and passing it back in (see
+// prepareMovieboxSubject in main.js); 4KHDHub has no such parameter, so the
+// equivalent cache lives here instead — same OnceLock<Mutex<..>> singleton
+// shape as MovieBoxClient's cache in movplayer.rs. Self-healing: a cached id
+// that no longer has the requested episode (rare — a differently-indexed
+// season, or a stale id from a same-titled show) just falls through to a
+// full re-resolve, same as if nothing had been cached.
+static ITEM_ID_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn cache_key(title: &str, expected_year: Option<u32>) -> String {
+    format!("{title}|{expected_year:?}")
+}
+
 async fn find_playable_release(
     client: &FourKHdHubClient,
     title: &str,
@@ -109,6 +128,17 @@ async fn find_playable_release(
     episode: usize,
     expected_year: Option<u32>,
 ) -> Result<(String, Vec<Release>), String> {
+    let cache = ITEM_ID_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = cache_key(title, expected_year);
+    let cached_id = cache.lock().unwrap().get(&key).cloned();
+    if let Some(id) = cached_id {
+        if let Ok(releases) = client.releases(&id, season, episode).await {
+            if !releases.is_empty() {
+                return Ok((id, releases));
+            }
+        }
+    }
+
     let results = search_candidates(client, title, expected_year).await?;
 
     let wanted_type = if season > 0 || episode > 0 { MediaType::Series } else { MediaType::Movie };
@@ -126,6 +156,7 @@ async fn find_playable_release(
     for item in ranked.into_iter().take(8) {
         let Ok(releases) = client.releases(&item.id.value, season, episode).await else { continue };
         if !releases.is_empty() {
+            cache.lock().unwrap().insert(key, item.id.value.clone());
             return Ok((item.id.value.clone(), releases));
         }
         if fallback.is_none() {
@@ -136,18 +167,47 @@ async fn find_playable_release(
     fallback.ok_or_else(|| format!("4KHDHub doesn't have a matching source for \"{}\" — try switching to MovieBox.", title))
 }
 
-// moviebox-tui's own releases_to_moviebox_json() converts 4KHDHub releases
-// into the exact same resource-list JSON shape MovieBox's API returns, so
-// this reuses extract_stream_options from movplayer.rs instead of a second
-// parallel parser — the two providers only really differ in how a chosen
-// option is actually resolved to a playable URL (see play_fourk_stream).
+// moviebox-tui 0.1.14 shipped a releases_to_moviebox_json() that converted
+// 4KHDHub releases into the exact same resource-list JSON shape MovieBox's
+// API returns, letting this reuse extract_stream_options from movplayer.rs
+// instead of a second parallel parser. 0.1.15 deleted it (and every other
+// provider's *_to_moviebox_json bridge) as part of moving the whole crate off
+// JSON internally — this reproduces just the part this app still needs
+// (verified against the current Release/SourceMirror struct shape, which
+// 0.1.15 left unchanged) rather than following that migration itself, since
+// extract_stream_options staying JSON-shaped is what lets it keep serving
+// both providers from one place.
+fn release_to_moviebox_json(index: usize, release: &Release) -> serde_json::Value {
+    // Deliberately not release.resolution_u64() — that helper defaults an
+    // unparseable/missing quality to 1080 (tuned for moviebox-tui's own DASH
+    // auto-selection), which would silently mislabel a real "unknown
+    // resolution" release as a plausible-looking wrong one here. This keeps
+    // the old bridge function's default of 0, which sorts/groups as a
+    // distinct, honestly-unknown bucket instead.
+    let resolution = release.quality.as_deref().and_then(|q| q.trim_end_matches('p').parse::<u64>().ok()).unwrap_or_default();
+    serde_json::json!({
+        "resourceId": format!("fourk-{}", index),
+        "resourceLink": release.mirrors.first().map(|m| m.resolver_url.clone()),
+        "title": release.filename,
+        "fileName": release.filename,
+        "size": release.size_bytes.map(|s| s.to_string()),
+        "resolution": resolution,
+        "codecName": release.codec,
+        "language": release.language,
+        "sourceCount": release.mirrors.len(),
+        "uploadBy": "4KHDHub",
+        "se": release.season.unwrap_or_default(),
+        "ep": release.episode.unwrap_or_default(),
+        "_fourk_release": release,
+    })
+}
+
 #[tauri::command]
 pub async fn get_fourk_stream_options(title: String, season: u32, episode: u32, year: Option<u32>) -> Result<Vec<StreamOption>, String> {
     let client = get_client()?;
     let (_, releases) = find_playable_release(&client, &title, season as usize, episode as usize, year).await?;
 
-    let json = releases_to_moviebox_json(&releases);
-    let list = json.as_array().cloned().unwrap_or_default();
+    let list: Vec<serde_json::Value> = releases.iter().enumerate().map(|(i, r)| release_to_moviebox_json(i, r)).collect();
     let options = extract_stream_options("", &list);
     if options.is_empty() {
         return Err("No playable source found for this title/episode.".to_string());
@@ -183,7 +243,13 @@ async fn diagnose_unreachable(url: &str) -> String {
 // same episode, each with its own independent pair of mirrors, so one
 // release's mirrors being temporarily down doesn't have to be a dead end.
 #[tauri::command]
-pub async fn play_fourk_stream(app: AppHandle, releases: Vec<Release>, window_title: String) -> Result<String, String> {
+pub async fn play_fourk_stream(
+    app: AppHandle,
+    releases: Vec<Release>,
+    window_title: String,
+    start_seconds: Option<f64>,
+    watch_id: String,
+) -> Result<String, String> {
     if releases.is_empty() {
         return Err("No source selected".to_string());
     }
@@ -220,11 +286,27 @@ pub async fn play_fourk_stream(app: AppHandle, releases: Vec<Release>, window_ti
     // same reasoning applies to this provider).
     let mut sidecar = app.shell().sidecar("mpv").map_err(|e| format!("Failed to resolve bundled mpv: {}", e))?;
     sidecar = sidecar.arg(format!("--force-media-title={}", window_title));
+    if let Some(start) = start_seconds {
+        sidecar = sidecar.arg(format!("--start={start}"));
+    }
+    let tracking = crate::mpv_progress::TrackingSetup::new();
+    if let Some(setup) = &tracking {
+        sidecar = sidecar.args(setup.mpv_args());
+    }
     // See spawn_mpv in movplayer.rs for why: mpv's default demuxer cache is
     // sized for local files, not a multi-GB remote episode through a
     // third-party mirror, and underruns (mpv pauses on those by default)
-    // show up as "slow"/stuttery playback.
-    sidecar = sidecar.args(["--cache=yes", "--demuxer-max-bytes=500MiB", "--demuxer-max-back-bytes=150MiB"]);
+    // show up as "slow"/stuttery playback. The reconnect option matters even
+    // more here than for MovieBox — hubcloud/hubdrive mirrors are more prone
+    // to mid-stream hiccups, and without it a dropped connection just hangs
+    // instead of resuming, which looks like a freeze no matter how small the
+    // file is.
+    sidecar = sidecar.args([
+        "--cache=yes",
+        "--demuxer-max-bytes=500MiB",
+        "--demuxer-max-back-bytes=150MiB",
+        "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_at_eof=1,reconnect_delay_max=5",
+    ]);
     if !source.headers.is_empty() {
         let header_str = source.headers.iter().map(|(k, v)| format!("{}: {}", k, v)).collect::<Vec<_>>().join(",");
         sidecar = sidecar.arg(format!("--http-header-fields={}", header_str));
@@ -234,8 +316,8 @@ pub async fn play_fourk_stream(app: AppHandle, releases: Vec<Release>, window_ti
     }
     sidecar = sidecar.arg(&source.url);
 
-    let (mut rx, _child) = sidecar.spawn().map_err(|e| format!("Failed to launch mpv: {}", e))?;
-    tauri::async_runtime::spawn(async move { while rx.recv().await.is_some() {} });
+    let (rx, _child) = sidecar.spawn().map_err(|e| format!("Failed to launch mpv: {}", e))?;
+    crate::mpv_progress::track(app.clone(), rx, tracking, watch_id);
 
     Ok(format!("Playing \"{}\"", window_title))
 }
