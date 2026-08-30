@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trela — Anime Browser</title>
+    <script type="module" src="/js/main.js" defer></script>
+  </head>
+
+  <body>
+    <div class="app">
+      <header class="nav">
+        <button type="button" class="nav-brand" id="nav-brand-btn"><span class="nav-brand-dot"></span>Trela</button>
+        <div class="nav-links">
+          <button class="nav-item" data-view="browse">Anime</button>
+          <button class="nav-item" data-view="movies">Movies</button>
+          <button class="nav-item" data-view="series">Series</button>
+          <button class="nav-item" data-view="about">About</button>
+        </div>
+        <div class="header-search">
+          <button id="header-search-trigger" class="search-trigger" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span class="trigger-label">Search anime, movies, series</span>
+            <kbd>Ctrl K</kbd>
+          </button>
+        </div>
+        <div class="nav-tools">
+          <div class="nav-notif-wrap">
+            <button id="notif-bell-btn" class="btn btn-secondary btn-icon" aria-label="Notifications" aria-haspopup="true" aria-expanded="false" aria-controls="notif-dropdown" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              <span id="notif-badge" class="notif-badge hidden">0</span>
+            </button>
+            <div id="notif-dropdown" class="stream-dropdown notif-dropdown hidden">
+              <div class="notif-dropdown-header">
+                <span>Notifications</span>
+                <button type="button" id="notif-clear-btn" class="btn btn-ghost">Clear</button>
+              </div>
+              <div id="notif-list"></div>
+            </div>
+          </div>
+          <button id="theme-toggle" class="btn btn-secondary btn-icon" aria-label="Toggle theme" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+        </div>
+      </header>
+
+      <div id="command-palette" class="dialog-backdrop hidden">
+        <div class="dialog">
+          <input id="palette-input" placeholder="Search anime, movies, series..." autocomplete="off" />
+          <div id="palette-results" class="dialog-results"></div>
+        </div>
+      </div>
+
+      <div class="content">
+        <main class="main-area">
+          <section id="view-home" class="view">
+            <div class="hero" id="home-hero">
+              <div class="hero-backdrop" id="hero-backdrop"></div>
+              <div class="hero-overlay"></div>
+              <div class="hero-content">
+                <span class="tag" id="hero-tag-label">Trending now</span>
+                <h1 id="hero-title">—</h1>
+                <p class="hero-meta" id="hero-meta"></p>
+                <p class="hero-desc" id="hero-desc"></p>
+                <div class="hero-cta">
+                  <button id="hero-resume-btn" type="button" class="btn btn-primary hidden"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Resume</button>
+                  <button id="hero-details-btn" type="button" class="btn btn-secondary">Details</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="continue-watching-section" class="hidden">
+              <div class="section-row">
+                <h3 class="section-heading">Pick up where you left off</h3>
+              </div>
+              <div id="continue-watching-list" class="poster-grid"></div>
+            </div>
+
+            <div id="wishlist-section" class="hidden">
+              <div class="section-row">
+                <h3 class="section-heading">My List</h3>
+              </div>
+              <div id="wishlist-grid" class="poster-grid"></div>
+            </div>
+
+            <div class="section-row">
+              <h3 class="section-heading">Airing this season</h3>
+              <button type="button" id="home-browse-all-btn" class="btn btn-ghost">Browse all &rarr;</button>
+            </div>
+            <div id="home-seasonal-grid" class="poster-grid"></div>
+          </section>
+
+          <section id="view-browse" class="view hidden">
+            <div class="browse-layout">
+              <div class="browse-main">
+                <h1 class="page-title">Browse</h1>
+                <p class="page-subtitle">Seasonal charts from AniList, playable through ani-cli.</p>
+
+                <div class="browse-layout-toggle">
+                  <span class="layout-label">Layout</span>
+                  <div class="seg" id="browse-layout-seg">
+                    <label class="seg-opt"><input type="radio" name="browse-layout" value="spotlight">Spotlight</label>
+                    <label class="seg-opt"><input type="radio" name="browse-layout" value="seasons" checked>Seasons</label>
+                  </div>
+                </div>
+
+                <div id="browse-spotlight" class="hidden">
+                  <div class="hero" id="spotlight-card"></div>
+
+                  <div class="section-row">
+                    <h3 class="section-heading">Recently released</h3>
+                  </div>
+                  <div id="browse-recent-scroll" class="scroll-row"></div>
+                </div>
+
+                <div id="browse-seasons">
+                  <div id="season-buttons" class="season-buttons browse-seasons"></div>
+
+                  <div class="filter-row">
+                    <label class="filter-label" for="anime-genre-filter">Genre</label>
+                    <select id="anime-genre-filter" class="input filter-select">
+                      <option value="">All genres</option>
+                    </select>
+                  </div>
+
+                  <div class="section-row">
+                    <h3 class="section-heading" id="seasonal-heading">This Season</h3>
+                    <div class="slide-nav-group">
+                      <button class="slide-nav" data-target="seasonal" data-dir="-1" aria-label="Previous">&#8249;</button>
+                      <button class="slide-nav" data-target="seasonal" data-dir="1" aria-label="Next">&#8250;</button>
+                    </div>
+                  </div>
+                  <div class="slide-viewport"><div id="seasonal-track" class="slide-track"></div></div>
+
+                  <div class="section-row">
+                    <h3 class="section-heading">New Episodes</h3>
+                    <div class="slide-nav-group">
+                      <button class="slide-nav" data-target="recent" data-dir="-1" aria-label="Previous">&#8249;</button>
+                      <button class="slide-nav" data-target="recent" data-dir="1" aria-label="Next">&#8250;</button>
+                    </div>
+                  </div>
+                  <div class="slide-viewport"><div id="recent-track" class="slide-track"></div></div>
+                </div>
+              </div>
+
+              <aside class="browse-sidebar">
+                <h3 class="sidebar-heading">Trending</h3>
+                <div id="trending-panel"></div>
+              </aside>
+            </div>
+          </section>
+
+          <section id="view-details" class="view hidden details-page">
+            <div class="details-backdrop" id="details-backdrop"></div>
+            <div class="details-content">
+              <button class="btn btn-ghost back-btn" data-back="home">&larr; Back to Home</button>
+              <button id="anime-wishlist-btn" type="button" class="btn btn-secondary">+ Wishlist</button>
+              <button id="anime-watched-btn" type="button" class="btn btn-secondary">Mark as Watched</button>
+
+              <div id="anime-details-container">
+                <p class="muted-center">Select an anime to view details</p>
+              </div>
+
+              <div class="hidden" id="episodes-card">
+                <h3 class="section-heading">Episodes</h3>
+                <div id="episodes-list" class="episodes-grid"></div>
+              </div>
+
+              <div class="section-row">
+                <h3 class="section-heading">Because you watched this</h3>
+                <div class="slide-nav-group">
+                  <button class="slide-nav" data-target="animeRecs" data-dir="-1" aria-label="Previous">&#8249;</button>
+                  <button class="slide-nav" data-target="animeRecs" data-dir="1" aria-label="Next">&#8250;</button>
+                </div>
+              </div>
+              <div class="slide-viewport"><div id="anime-recs-track" class="slide-track"></div></div>
+            </div>
+          </section>
+
+          <section id="view-movies" class="view hidden">
+            <h1 class="page-title">Movies</h1>
+            <p class="page-subtitle">Metadata from TMDB, playback through MovieBox.</p>
+
+            <div class="hero" id="movie-spotlight-card"></div>
+
+            <div class="search-inline">
+              <input id="movie-search-input" class="input" placeholder="Search movies..." autocomplete="off" />
+              <button id="movie-search-btn" class="btn btn-primary" type="button">Search</button>
+            </div>
+
+            <div class="filter-row">
+              <label class="filter-label" for="movie-genre-filter">Genre</label>
+              <select id="movie-genre-filter" class="input filter-select">
+                <option value="">All genres</option>
+              </select>
+              <label class="filter-label" for="movie-year-filter">Year</label>
+              <select id="movie-year-filter" class="input filter-select"></select>
+            </div>
+            <div id="movie-search-results" class="poster-grid"></div>
+
+            <div id="movie-trending-section">
+              <div class="section-row">
+                <h3 class="sidebar-heading">Trending Movies</h3>
+                <div class="slide-nav-group">
+                  <button class="slide-nav" data-target="trendingMovies" data-dir="-1" aria-label="Previous">&#8249;</button>
+                  <button class="slide-nav" data-target="trendingMovies" data-dir="1" aria-label="Next">&#8250;</button>
+                </div>
+              </div>
+              <div class="slide-viewport"><div id="trending-movies-track" class="slide-track"></div></div>
+            </div>
+
+            <div id="movie-genre-rows"></div>
+          </section>
+
+          <section id="view-series" class="view hidden">
+            <h1 class="page-title">Series</h1>
+            <p class="page-subtitle">Metadata from TMDB, playback through MovieBox.</p>
+
+            <div class="hero" id="series-spotlight-card"></div>
+
+            <div class="search-inline">
+              <input id="series-search-input" class="input" placeholder="Search series..." autocomplete="off" />
+              <button id="series-search-btn" class="btn btn-primary" type="button">Search</button>
+            </div>
+
+            <div class="filter-row">
+              <label class="filter-label" for="series-genre-filter">Genre</label>
+              <select id="series-genre-filter" class="input filter-select">
+                <option value="">All genres</option>
+              </select>
+              <label class="filter-label" for="series-year-filter">Year</label>
+              <select id="series-year-filter" class="input filter-select"></select>
+            </div>
+            <div id="series-search-results" class="poster-grid"></div>
+
+            <div id="series-trending-section">
+              <div class="section-row">
+                <h3 class="sidebar-heading">Trending Series</h3>
+                <div class="slide-nav-group">
+                  <button class="slide-nav" data-target="trendingSeries" data-dir="-1" aria-label="Previous">&#8249;</button>
+                  <button class="slide-nav" data-target="trendingSeries" data-dir="1" aria-label="Next">&#8250;</button>
+                </div>
+              </div>
+              <div class="slide-viewport"><div id="trending-series-track" class="slide-track"></div></div>
+            </div>
+
+            <div id="series-genre-rows"></div>
+          </section>
+
+          <section id="view-movie-details" class="view hidden details-page">
+            <div class="details-backdrop" id="movie-details-backdrop"></div>
+            <div class="details-content">
+              <button class="btn btn-ghost back-btn" data-back="movies">&larr; Back to Movies</button>
+
+              <div id="movie-details-container"></div>
+              <button id="movie-watch-btn" type="button" class="btn btn-primary" style="margin-top: 16px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Watch Now</button>
+              <button id="movie-wishlist-btn" type="button" class="btn btn-secondary" style="margin-top: 16px;">+ Wishlist</button>
+              <button id="movie-watched-btn" type="button" class="btn btn-secondary" style="margin-top: 16px;">Mark as Watched</button>
+
+              <div class="section-row">
+                <h3 class="section-heading">Because you watched this</h3>
+                <div class="slide-nav-group">
+                  <button class="slide-nav" data-target="movieRecs" data-dir="-1" aria-label="Previous">&#8249;</button>
+                  <button class="slide-nav" data-target="movieRecs" data-dir="1" aria-label="Next">&#8250;</button>
+                </div>
+              </div>
+              <div class="slide-viewport"><div id="movie-recs-track" class="slide-track"></div></div>
+            </div>
+          </section>
+
+          <section id="view-series-details" class="view hidden details-page">
+            <div class="details-backdrop" id="series-details-backdrop"></div>
+            <div class="details-content">
+              <button class="btn btn-ghost back-btn" data-back="series">&larr; Back to Series</button>
+              <button id="series-wishlist-btn" type="button" class="btn btn-secondary">+ Wishlist</button>
+              <button id="series-watched-btn" type="button" class="btn btn-secondary">Mark as Watched</button>
+
+              <div id="series-details-container"></div>
+
+              <div class="section-row">
+                <h3 class="section-heading">Season</h3>
+              </div>
+              <div id="series-season-buttons" class="season-buttons"></div>
+
+              <div class="section-row">
+                <h3 class="section-heading">Episodes</h3>
+              </div>
+              <div id="series-episodes-list" class="episodes-grid"></div>
+
+              <div class="section-row">
+                <h3 class="section-heading">Because you watched this</h3>
+                <div class="slide-nav-group">
+                  <button class="slide-nav" data-target="seriesRecs" data-dir="-1" aria-label="Previous">&#8249;</button>
+                  <button class="slide-nav" data-target="seriesRecs" data-dir="1" aria-label="Next">&#8250;</button>
+                </div>
+              </div>
+              <div class="slide-viewport"><div id="series-recs-track" class="slide-track"></div></div>
+            </div>
+          </section>
+
+          <section id="view-watching" class="view hidden watching-page">
+            <button class="btn btn-ghost back-btn" data-back="details" id="watching-back-btn">&larr; Back to Details</button>
+
+            <div id="watch-meta"></div>
+
+            <div id="player-info" class="player-info">
+              <button id="play-btn" type="button" class="player-play-circle" aria-label="Play"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
+              <p id="player-status">Ready to play</p>
+            </div>
+
+            <div class="watch-settings-wrap">
+              <button id="watch-settings-btn" type="button" class="btn btn-secondary" aria-haspopup="true" aria-expanded="false" aria-controls="watch-settings-popover">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Playback settings
+              </button>
+              <div id="watch-settings-popover" class="stream-dropdown watch-settings-popover hidden">
+                <div class="watch-quality" id="quality-select-wrap">
+                  <span class="quality-label">Quality</span>
+                  <div class="seg" id="quality-seg">
+                    <label class="seg-opt"><input type="radio" name="quality" value="best" checked>Best</label>
+                    <label class="seg-opt"><input type="radio" name="quality" value="1080">1080p</label>
+                    <label class="seg-opt"><input type="radio" name="quality" value="720">720p</label>
+                    <label class="seg-opt"><input type="radio" name="quality" value="480">480p</label>
+                    <label class="seg-opt"><input type="radio" name="quality" value="360">360p</label>
+                    <label class="seg-opt"><input type="radio" name="quality" value="worst">Worst</label>
+                  </div>
+                </div>
+
+                <div class="watch-quality hidden" id="watch-language-wrap">
+                  <span class="quality-label">Language</span>
+                  <select id="watch-language-select" class="input filter-select"></select>
+                </div>
+
+                <div class="watch-quality hidden" id="stream-options-wrap">
+                  <span class="quality-label">Source</span>
+                  <div class="seg" id="stream-options-seg"></div>
+                </div>
+
+                <div class="watch-quality hidden" id="watch-subtitle-wrap">
+                  <span class="quality-label">Subtitle</span>
+                  <select id="watch-subtitle-select" class="input filter-select">
+                    <option value="">None</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="download-row hidden" id="download-wrap">
+              <button id="download-btn" type="button" class="btn btn-secondary">&#8681; Download &amp; Play</button>
+              <div class="download-progress hidden" id="download-progress-wrap">
+                <div class="download-progress-bar"><div class="download-progress-fill" id="download-progress-fill"></div></div>
+                <p class="download-progress-status" id="download-progress-status"></p>
+              </div>
+            </div>
+
+            <div id="episode-nav" class="episode-nav hidden">
+              <button id="episode-prev-btn" type="button">&#8249; Previous Episode</button>
+              <button id="episode-next-btn" type="button">Next Episode &#8250;</button>
+            </div>
+          </section>
+
+          <section id="view-about" class="view hidden settings-page">
+            <h1 class="page-title">Settings</h1>
+
+            <div class="settings-section">
+              <h3 class="section-heading">About</h3>
+              <p class="muted-block">Built with Tauri (Rust) and modern web technologies.</p>
+            </div>
+
+            <div class="settings-section">
+              <h3 class="section-heading">ani-cli</h3>
+              <p class="muted-block">
+                Trela uses ani-cli to resolve and play episodes. If playback stops working, anidb.app (what ani-cli
+                searches) may have changed something — updating ani-cli often fixes it once a new version ships.
+              </p>
+              <button id="update-ani-cli-btn" type="button" class="btn btn-secondary">Check for ani-cli Update</button>
+              <pre id="update-ani-cli-status" class="update-status"></pre>
+            </div>
+
+            <div class="settings-section">
+              <h3 class="section-heading">Movies &amp; Series</h3>
+              <p class="muted-block">
+                Movies and Series use the <strong>TMDB</strong> API for search/browse metadata (requires a free
+                API key — create one at <strong>themoviedb.org → Settings → API</strong>, no cost, no card) and
+                both <strong>MovieBox</strong> and <strong>4KHDHub</strong> for playback — the Watching page's
+                Source picker lists options from both together, tagged by provider.
+              </p>
+              <div class="search-inline">
+                <input id="tmdb-key-input" class="input" type="password" placeholder="TMDB API key" autocomplete="off" />
+                <button id="tmdb-key-save-btn" class="btn btn-primary" type="button">Save</button>
+              </div>
+              <p id="tmdb-key-status" class="update-status"></p>
+            </div>
+
+            <div class="settings-section">
+              <h3 class="section-heading">Downloads</h3>
+              <p class="muted-block">
+                When a movie/series source won't stream reliably, "Download &amp; Play" on the Watching page saves
+                it under your Downloads folder in a <strong>Trela</strong> subfolder instead.
+              </p>
+              <p id="downloads-info" class="muted-block"></p>
+              <button id="clear-downloads-btn" type="button" class="btn btn-secondary">Clear Downloaded Files</button>
+              <p id="clear-downloads-status" class="update-status"></p>
+            </div>
+
+            <div class="settings-section">
+              <h3 class="section-heading">Data</h3>
+              <p class="muted-block">
+                Export your wishlist, continue-watching list, and preferences to a file, or restore them on
+                another install. Your TMDB API key isn't included — re-enter it above after restoring.
+              </p>
+              <div class="search-inline">
+                <button id="export-backup-btn" type="button" class="btn btn-secondary">Export Backup</button>
+                <button id="import-backup-btn" type="button" class="btn btn-secondary">Import Backup</button>
+                <input id="import-backup-input" type="file" accept="application/json" class="hidden" />
+              </div>
+              <p id="backup-status" class="update-status"></p>
+            </div>
+          </section>
+        </main>
+
+        <footer class="footer">© 2026 Gamiolis</footer>
+      </div>
+    </div>
+  </body>
+</html>
