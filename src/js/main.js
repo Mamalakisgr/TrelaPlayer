@@ -1,5 +1,5 @@
 import { api, onEvent } from './api.js';
-import { debounce, renderError, escapeAttr, skeletonGrid, skeletonSpotlight } from './dom.js';
+import { countdownLineHtml, debounce, renderError, escapeAttr, skeletonGrid, skeletonSpotlight, startCountdownTicker } from './dom.js';
 import { createSlideshow, seasonalCardHtml, recentEpisodeCardHtml, movieCardHtml } from './slideshow.js';
 import { getContinueWatching, saveContinueWatching, removeContinueWatching, updateContinueWatchingProgress } from './continueWatching.js';
 import { getWishlist, addToWishlist, removeFromWishlist, isInWishlist } from './wishlist.js';
@@ -1073,6 +1073,7 @@ function mediaDetailsHtml(item, subParts, overview) {
       <div class="media-details-info">
         <h3>${item.title}</h3>
         <p class="poster-sub">${subParts.join(' · ')}</p>
+        ${countdownLineHtml(item)}
         ${genres ? `<div class="genre-chips">${genres}</div>` : ''}
         <p class="media-details-overview">${overview || ''}</p>
       </div>
@@ -2430,6 +2431,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initDownloadsSettings();
   initBackup();
   initNotifications();
+  startCountdownTicker();
   renderContinueWatching();
   renderMyList();
   renderNotifBadge();

@@ -22,7 +22,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
+.claude/
+.agents/
+.vscode/
+.clinerules/
+.cursor/
+.github/
+.opencode/
+.superpowers/
+.github/
+.windsurf/
 # Rust / Tauri build output
 src-tauri/target
 

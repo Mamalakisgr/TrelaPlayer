@@ -10,6 +10,14 @@ pub struct SeasonalAnime {
     pub status: String,
     pub genres: Vec<String>,
     pub synopsis: Option<String>,
+    // Unix seconds for the next episode (airing shows) or the announced
+    // premiere date (upcoming ones); None when nothing is scheduled yet. The
+    // frontend counts down against it live, so it stays a raw timestamp
+    // rather than a pre-rendered "in 2d 4h" string.
+    pub next_airing_at: Option<i64>,
+    // Only set alongside a real airing schedule — an upcoming premiere
+    // counted down from its start date has no episode number to show.
+    pub next_episode: Option<u64>,
 }
 
 #[derive(Serialize, Clone)]

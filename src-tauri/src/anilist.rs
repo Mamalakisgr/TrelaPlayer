@@ -16,6 +16,8 @@ const MEDIA_FIELDS: &str = "
     status
     genres
     description(asHtml: false)
+    nextAiringEpisode { airingAt episode }
+    startDate { year month day }
 ";
 
 async fn anilist_query(query: &str, variables: serde_json::Value) -> Result<serde_json::Value, String> {
@@ -53,6 +55,34 @@ fn strip_tags(s: &str) -> String {
     out.trim().to_string()
 }
 
+// (year, month, day) -> days-since-epoch, Howard Hinnant's days_from_civil —
+// the inverse of current_year_month_utc's algorithm below, kept hand-rolled
+// for the same reason: one date conversion doesn't justify a date crate.
+fn epoch_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    (era * 146097 + doe - 719468) * 86400
+}
+
+// AniList only fills nextAiringEpisode once a show has a real broadcast
+// schedule. Upcoming titles often have just an announced premiere date, and
+// the furthest-out ones only a year ("2027") — which is nothing to count
+// down to, so those get None rather than a misleading Jan 1st.
+fn parse_next_airing(item: &serde_json::Value) -> (Option<i64>, Option<u64>) {
+    if let Some(airing_at) = item["nextAiringEpisode"]["airingAt"].as_i64() {
+        return (Some(airing_at), item["nextAiringEpisode"]["episode"].as_u64());
+    }
+    let start = &item["startDate"];
+    match (start["year"].as_i64(), start["month"].as_i64(), start["day"].as_i64()) {
+        (Some(y), Some(m), Some(d)) => (Some(epoch_from_civil(y, m, d)), None),
+        _ => (None, None),
+    }
+}
+
 fn parse_media_item(item: &serde_json::Value) -> Option<SeasonalAnime> {
     let id = item["id"].as_u64()?;
     let title = item["title"]["romaji"].as_str().or_else(|| item["title"]["english"].as_str())?.to_string();
@@ -65,6 +95,7 @@ fn parse_media_item(item: &serde_json::Value) -> Option<SeasonalAnime> {
         .as_array()
         .map(|arr| arr.iter().filter_map(|g| g.as_str().map(str::to_string)).collect())
         .unwrap_or_default();
+    let (next_airing_at, next_episode) = parse_next_airing(item);
     Some(SeasonalAnime {
         id,
         title,
@@ -75,6 +106,8 @@ fn parse_media_item(item: &serde_json::Value) -> Option<SeasonalAnime> {
         status: item["status"].as_str().map(humanize_status).unwrap_or_default(),
         genres,
         synopsis: item["description"].as_str().map(strip_tags),
+        next_airing_at,
+        next_episode,
     })
 }
 
@@ -314,4 +347,82 @@ fn current_year_month_utc() -> (i32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (y as i32, m as u32)
+}
+
+#[cfg(test)]
+mod next_airing_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn media(extra: serde_json::Value) -> serde_json::Value {
+        let mut base = json!({
+            "id": 1,
+            "title": { "romaji": "Test Show", "english": null },
+            "coverImage": { "extraLarge": "http://img", "large": null },
+            "episodes": 12,
+            "averageScore": 80,
+            "genres": ["Action"],
+            "description": "Synopsis."
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            base[k] = v.clone();
+        }
+        base
+    }
+
+    // Tier 1: currently airing — AniList gives an exact timestamp + episode.
+    #[test]
+    fn releasing_uses_next_airing_episode() {
+        let item = media(json!({
+            "status": "RELEASING",
+            "nextAiringEpisode": { "airingAt": 1790949600i64, "episode": 12 },
+            "startDate": { "year": 2026, "month": 7, "day": 5 }
+        }));
+        let parsed = parse_media_item(&item).unwrap();
+        assert_eq!(parsed.next_airing_at, Some(1790949600));
+        assert_eq!(parsed.next_episode, Some(12));
+    }
+
+    // Tier 2: upcoming with a announced premiere date but no schedule entry —
+    // count down to the start date instead, with no episode number.
+    #[test]
+    fn unreleased_falls_back_to_full_start_date() {
+        let item = media(json!({
+            "status": "NOT_YET_RELEASED",
+            "nextAiringEpisode": null,
+            "startDate": { "year": 2026, "month": 10, "day": 20 }
+        }));
+        let parsed = parse_media_item(&item).unwrap();
+        // 2026-10-20T00:00:00Z
+        assert_eq!(parsed.next_airing_at, Some(1792454400));
+        assert_eq!(parsed.next_episode, None);
+    }
+
+    // Tier 3: upcoming, year only ("2027") — nothing to count down to.
+    #[test]
+    fn unreleased_year_only_start_date_yields_no_countdown() {
+        let item = media(json!({
+            "status": "NOT_YET_RELEASED",
+            "nextAiringEpisode": null,
+            "startDate": { "year": 2027, "month": null, "day": null }
+        }));
+        let parsed = parse_media_item(&item).unwrap();
+        assert_eq!(parsed.next_airing_at, None);
+        assert_eq!(parsed.next_episode, None);
+    }
+
+    #[test]
+    fn missing_schedule_fields_entirely_yields_no_countdown() {
+        let item = media(json!({ "status": "FINISHED" }));
+        let parsed = parse_media_item(&item).unwrap();
+        assert_eq!(parsed.next_airing_at, None);
+        assert_eq!(parsed.next_episode, None);
+    }
+
+    #[test]
+    fn epoch_from_civil_date_matches_known_timestamps() {
+        assert_eq!(epoch_from_civil(1970, 1, 1), 0);
+        assert_eq!(epoch_from_civil(2000, 3, 1), 951868800);
+        assert_eq!(epoch_from_civil(2026, 10, 20), 1792454400);
+    }
 }

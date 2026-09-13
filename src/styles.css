@@ -1,7 +1,7 @@
 /* Nocturne design system — tokens + components, retuned to the "Trela
    Redesign" mockup (same token family, refreshed layout/spacing/hover
    language). Retune the look by editing the tokens here. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
 
 :root {
   --color-bg: #161826;
@@ -39,9 +39,13 @@
   --color-muted: #9397ab;
   --color-subtle: #8b8fa3;
 
-  --font-heading: "Inter", system-ui, sans-serif;
-  --font-heading-weight: 500;
-  --font-body: "Inter", system-ui, sans-serif;
+  --font-heading: "Geist", system-ui, sans-serif;
+  --font-heading-weight: 600;
+  --font-body: "Geist", system-ui, sans-serif;
+  /* Every ticking or ranked number in the UI (countdowns, scores, episode
+     counts) renders in this — proportional digits change width as they
+     change value, which makes a once-a-minute countdown visibly jitter. */
+  --font-mono: "Geist Mono", ui-monospace, monospace;
 
   --space-1: 2.8px;
   --space-2: 5.6px;
@@ -54,10 +58,12 @@
   --radius-md: 8px;
   --radius-lg: 14px;
 
+  /* Tinted toward the background's own blue-violet rather than pure black —
+     a neutral black shadow over a hued surface reads as a grey smudge. */
   --shadow-sm: 0 0 0 1px #3f424d;
-  --shadow-md: 0 0 0 1px #595d6c, 0 6px 18px rgba(0,0,0,0.55);
-  --shadow-lg: 0 0 0 1px #9397ab, 0 16px 40px rgba(0,0,0,0.65);
-  --shadow-hover: 0 14px 34px rgba(0,0,0,0.55);
+  --shadow-md: 0 0 0 1px #595d6c, 0 6px 18px rgba(7, 8, 18, 0.58);
+  --shadow-lg: 0 0 0 1px #9397ab, 0 16px 40px rgba(7, 8, 18, 0.68);
+  --shadow-hover: 0 14px 34px rgba(7, 8, 18, 0.6);
 }
 
 :root.light {
@@ -96,6 +102,8 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 body { margin: 0; font-size: 15px; line-height: 1.55; font-weight: 400; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); }
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading); font-weight: var(--font-heading-weight);
@@ -124,9 +132,15 @@ img { display: block; max-width: 100%; }
   background: transparent; border: 1px solid transparent;
   padding: var(--space-2) calc(var(--space-3) * 1.2);
   border-radius: var(--radius-md);
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.08s;
 }
+/* Physical press feedback — colour alone doesn't read as "the click landed". */
+.btn:not(:disabled):active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: background 0.15s, border-color 0.15s, color 0.15s; }
+  .btn:not(:disabled):active { transform: none; }
+}
 /* Filled, not outlined — a primary action should read as the obvious thing to
    press. Uses --color-text/--color-bg (not --color-accent) so the accent stays
    a signal color (links, active states, glow) instead of competing with itself
@@ -347,7 +361,10 @@ img { display: block; max-width: 100%; }
 .poster-card:focus-visible { outline: none; }
 .poster-card:focus-visible .poster-image-wrap { box-shadow: var(--shadow-hover), 0 0 0 2px var(--color-accent); }
 .poster-card img { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; display: block; background: var(--poster-gradient); }
-.poster-card .poster-score { position: absolute; top: 8px; left: 8px; z-index: 2; background: color-mix(in srgb, var(--color-bg) 72%, transparent); color: var(--color-accent); font-size: 0.7em; font-weight: 600; padding: 3px 8px; border-radius: 5px; backdrop-filter: blur(6px); }
+.poster-card .poster-score { position: absolute; top: 8px; left: 8px; z-index: 2; background: color-mix(in srgb, var(--color-bg) 72%, transparent); color: var(--color-accent); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 0.68em; font-weight: 500; padding: 3px 8px; border-radius: 5px; backdrop-filter: blur(6px); }
+/* Opposite corner from the score, and deliberately not accent-coloured —
+   one accent pill per card keeps the rating the thing the eye lands on. */
+.poster-card .poster-countdown { position: absolute; top: 8px; right: 8px; z-index: 2; background: color-mix(in srgb, var(--color-bg) 72%, transparent); color: rgba(255,255,255,0.92); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 0.68em; font-weight: 500; padding: 3px 8px; border-radius: 5px; backdrop-filter: blur(6px); }
 
 .poster-card .poster-reveal {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; padding: 11px 10px 9px;
@@ -393,7 +410,7 @@ img { display: block; max-width: 100%; }
   .poster-card:hover .see-all-card, .poster-card:focus-visible .see-all-card, .poster-card:focus-within .see-all-card { transform: none; }
 }
 
-.page-title { font-size: 32px; font-weight: 500; letter-spacing: -0.02em; margin: 0 0 4px; }
+.page-title { font-size: 32px; font-weight: var(--font-heading-weight); letter-spacing: -0.025em; margin: 0 0 4px; text-wrap: balance; }
 .page-subtitle { font-size: 13.5px; color: var(--color-muted); margin: 0 0 26px; }
 .sidebar-heading { font-size: 13px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-muted); margin: 0 0 14px; }
 .section-row { display: flex; align-items: baseline; justify-content: space-between; margin: var(--space-8) 0 var(--space-4); }
@@ -429,8 +446,14 @@ img { display: block; max-width: 100%; }
 .browse-layout { display: flex; gap: var(--space-8); align-items: flex-start; }
 .browse-main { flex: 1; min-width: 0; }
 .browse-sidebar { width: 268px; flex: 0 0 268px; position: sticky; top: 78px; }
-.trending-item { display: flex; gap: var(--space-3); align-items: center; padding: 9px 6px; border-bottom: 1px solid var(--color-divider); cursor: pointer; transition: padding-left 0.18s, color 0.18s; }
-.trending-item:hover { padding-left: 12px; color: var(--color-accent); }
+/* Slides on transform rather than padding-left: the padding version relaid
+   out the whole row (and every row after it) on each hover frame. */
+.trending-item { display: flex; gap: var(--space-3); align-items: center; padding: 9px 6px; border-bottom: 1px solid var(--color-divider); cursor: pointer; transition: transform 0.18s, color 0.18s; }
+.trending-item:hover { transform: translateX(6px); color: var(--color-accent); }
+@media (prefers-reduced-motion: reduce) {
+  .trending-item { transition: color 0.18s; }
+  .trending-item:hover { transform: none; }
+}
 .trending-item img { width: 34px; height: 48px; object-fit: cover; border-radius: var(--radius-sm); flex: 0 0 34px; background: var(--poster-gradient); }
 .trending-rank { flex: 0 0 18px; text-align: center; color: var(--color-accent-700); font-size: 0.85em; }
 :root.light .trending-rank { color: var(--color-accent-500); }
@@ -447,6 +470,13 @@ img { display: block; max-width: 100%; }
 .media-details-info { flex: 1; min-width: 240px; }
 .media-details-info h3 { font-size: 28px; margin: 0 0 var(--space-2); }
 .media-details-info .poster-sub { color: var(--color-accent); font-weight: 500; }
+.media-details-info .detail-countdown {
+  display: inline-block; margin: var(--space-2) 0 0; padding: 4px 10px; border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  color: var(--color-accent); font-size: 0.82em; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
 .media-details-info .genre-chips { margin: var(--space-3) 0; }
 .media-details-overview { color: var(--color-subtle); font-size: 0.92em; line-height: 1.6; }
 

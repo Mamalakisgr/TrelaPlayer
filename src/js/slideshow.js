@@ -1,4 +1,4 @@
-import { escapeAttr, skeletonRow } from './dom.js';
+import { countdownBadgeHtml, escapeAttr, skeletonRow } from './dom.js';
 
 const PAGE_SIZE = 5;
 
@@ -63,6 +63,7 @@ function posterCardHtml(item, subParts) {
     <div class="poster-image-wrap">
       <img src="${item.image_url}" alt="${escapeAttr(item.title)}" loading="lazy" />
       ${score ? `<span class="poster-score">★ ${item.rating ? score.toFixed(1) : score}</span>` : ''}
+      ${countdownBadgeHtml(item)}
       <div class="poster-reveal">
         <div class="poster-title">${item.title}</div>
         <div class="poster-sub">${subParts.join(' · ')}</div>
