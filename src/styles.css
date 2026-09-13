@@ -2,6 +2,12 @@
    Redesign" mockup (same token family, refreshed layout/spacing/hover
    language). Retune the look by editing the tokens here. */
 @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+/* Y2K theme fonts — only pulled in because @import can't be conditional; the
+   faces stay unused until :root[data-theme="y2k"] switches --font-* over. */
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Nunito:wght@400;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Abril+Fatface&family=Merriweather:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&display=swap');
 
 :root {
   --color-bg: #161826;
@@ -83,7 +89,7 @@
   --color-subtle: #565a6c;
 }
 @media (prefers-color-scheme: light) {
-  :root:not(.light):not(.dark) {
+  :root:not(.light):not(.dark):not([data-theme]) {
     --color-bg: #f3f5fe;
     --color-surface: #e9ebf7;
     --color-raise: #ffffff;
@@ -701,3 +707,991 @@ footer.footer { flex: 0 0 auto; height: 46px; display: flex; align-items: center
   .header-search { order: 1; flex: 1 1 100%; }
   .search-trigger { width: 100%; max-width: none; }
 }
+
+/* ---------------------------------------------------------------------
+   Theme: Y2K Midnight
+   ---------------------------------------------------------------------
+   A second design system layered over the same tokens Nocturne defines.
+   Selected via <html data-theme="y2k"> (js/main.js applyThemeFamily), so
+   the :root / :root.light blocks above stay untouched and switching back
+   restores them exactly.
+
+   Dark-only, and everything below is palette-driven: every surface, line,
+   shadow and fill reads a --y2k-* token, so the theme re-tints by editing
+   the block below and nothing else. Getting there meant splitting
+   --y2k-ink, which had been doing three incompatible jobs at once: border
+   colour, shadow colour, and the text colour on bright fills. Over a light
+   ground one value served all three; over a dark one they diverge, because
+   the lines go light while the shadow and the text on lemon stay dark.
+
+   Everything below is either a token override (most of it) or a rule that
+   undoes something Nocturne does which Y2K forbids — blur, soft shadows,
+   rounded corners, tight tracking.
+   --------------------------------------------------------------------- */
+
+:root[data-theme="y2k"] {
+  --y2k-ground: #16122b;       /* page */
+  --y2k-window: #241c3f;       /* panels, cards, buttons */
+  --y2k-field: #120e24;        /* recessed: inputs, progress tracks */
+  --y2k-ink: #efe6ff;          /* every border and line, and chrome text */
+  --y2k-shadow: #0a0718;       /* the hard offset drop */
+  --y2k-on-fill: #16122b;      /* text sitting on lemon / mint */
+  --y2k-title-bar: #b3357f;
+  --y2k-lemon: #ffd84d;
+  --y2k-mint: #5ef2d6;
+  --y2k-grid: rgba(150, 120, 255, 0.16);
+
+  --color-bg: var(--y2k-ground);
+  --color-surface: var(--y2k-window);
+  --color-raise: #2c2350;
+  --color-text: #ece4ff;
+  --color-divider: var(--y2k-ink);
+
+  /* Bright enough to clear 4.5:1 on the window panel, which the old deep
+     magenta stopped doing the moment the ground went dark. */
+  --color-accent: #ff7ac6;
+  --color-accent-2: #ffa3d8;
+  --color-accent-400: #ffa3d8;
+
+  --color-muted: #b4a8d6;
+  --color-subtle: #a294cc;
+
+  --poster-gradient:
+    repeating-conic-gradient(#2a2148 0% 25%, #1d1735 0% 50%) 0 0 / 24px 24px;
+
+  /* Skeleton shimmer only — the rest of the neutral ramp has no reader. */
+  --color-neutral-700: #3a2f63;
+  --color-neutral-800: #241c3f;
+
+  --font-heading: "Press Start 2P", "Courier New", monospace;
+  --font-heading-weight: 400;
+  --font-body: "Nunito", system-ui, sans-serif;
+  --font-mono: "VT323", ui-monospace, monospace;
+
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+
+  /* Zero blur, offset only. */
+  --shadow-sm: 2px 2px 0 var(--y2k-shadow);
+  --shadow-md: 3px 3px 0 var(--y2k-shadow);
+  --shadow-lg: 6px 6px 0 var(--y2k-shadow);
+  --shadow-hover: 4px 4px 0 var(--y2k-shadow);
+}
+
+/* Nocturne hardcodes 22 pill/circle/5px radii that no token reaches. Squaring
+   them one selector at a time would mean editing rules that are correct for
+   the theme they were written for, so the theme layer blankets them instead —
+   and square dots and chips are the Y2K-correct result anyway. */
+:root[data-theme="y2k"] * { border-radius: 0 !important; }
+
+/* No frosted glass anywhere. */
+:root[data-theme="y2k"] .nav,
+:root[data-theme="y2k"] .dialog-backdrop,
+:root[data-theme="y2k"] .poster-score,
+:root[data-theme="y2k"] .poster-countdown,
+:root[data-theme="y2k"] .continue-remove { backdrop-filter: none; }
+
+:root[data-theme="y2k"] body {
+  background-color: var(--color-bg);
+  background-image:
+    linear-gradient(var(--y2k-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--y2k-grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+  font-weight: 600;
+}
+
+/* Press Start 2P renders roughly double its nominal size and has no small
+   size that stays legible — every heading scale Nocturne sets has to come
+   down with it, and the negative tracking has to go. */
+:root[data-theme="y2k"] h1, :root[data-theme="y2k"] h2,
+:root[data-theme="y2k"] h3, :root[data-theme="y2k"] h4,
+:root[data-theme="y2k"] h5, :root[data-theme="y2k"] h6 {
+  letter-spacing: 0; line-height: 1.65;
+}
+:root[data-theme="y2k"] h1 { font-size: 22px; }
+:root[data-theme="y2k"] h2 { font-size: 17px; }
+:root[data-theme="y2k"] h3 { font-size: 14px; }
+:root[data-theme="y2k"] .page-title { font-size: 20px; letter-spacing: 0; line-height: 1.6; margin-bottom: var(--space-4); }
+:root[data-theme="y2k"] .section-heading,
+:root[data-theme="y2k"] .card-title { font-size: 11px; line-height: 1.7; }
+:root[data-theme="y2k"] .hero-content h1,
+:root[data-theme="y2k"] .hero-content h2 { font-size: clamp(18px, 2.2vw, 28px); letter-spacing: 0; line-height: 1.5; }
+:root[data-theme="y2k"] .media-details-info h3,
+:root[data-theme="y2k"] .watch-player-title { font-size: 16px; letter-spacing: 0; line-height: 1.6; }
+:root[data-theme="y2k"] .nav-brand { font-size: 11px; letter-spacing: 0; }
+:root[data-theme="y2k"] .sidebar-heading,
+:root[data-theme="y2k"] .layout-label { font-family: var(--font-heading); font-size: 8px; letter-spacing: 0.06em; line-height: 1.8; }
+
+/* Buttons: pixel chrome, hard shadow, and a press that physically moves the
+   button down into its own shadow. */
+:root[data-theme="y2k"] .btn {
+  font-size: 10px; line-height: 1.6; letter-spacing: 0;
+  padding: 9px 14px; border: 2px solid var(--y2k-ink);
+  transition: transform 80ms, box-shadow 80ms, background 0.15s, color 0.15s;
+}
+:root[data-theme="y2k"] .btn-primary { background: var(--y2k-lemon); color: var(--y2k-on-fill); box-shadow: 3px 3px 0 var(--y2k-shadow); }
+:root[data-theme="y2k"] .btn-primary:hover { background: var(--y2k-mint); color: var(--y2k-on-fill); border-color: var(--y2k-ink); }
+:root[data-theme="y2k"] .btn-secondary { background: var(--y2k-window); box-shadow: 3px 3px 0 var(--y2k-shadow); }
+:root[data-theme="y2k"] .btn-secondary:hover { background: var(--y2k-mint); color: var(--y2k-on-fill); border-color: var(--y2k-ink); }
+:root[data-theme="y2k"] .btn-ghost { border-color: transparent; box-shadow: none; background: transparent; padding-inline: var(--space-1); }
+/* The y2k .btn padding above outranks the plain .btn-icon/.btn-ghost rules it
+   is meant to sit alongside, so both have to restate their own box here —
+   without this the icon buttons pad their 34px square down to nothing and the
+   glyph disappears entirely. */
+:root[data-theme="y2k"] .btn-icon { width: 34px; height: 34px; padding: 0; }
+:root[data-theme="y2k"] .btn:not(:disabled):active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--y2k-shadow); }
+:root[data-theme="y2k"] .retry-btn,
+:root[data-theme="y2k"] .watch-nav-btn,
+:root[data-theme="y2k"] .slide-nav,
+:root[data-theme="y2k"] .episode-btn {
+  border: 2px solid var(--y2k-ink); background: var(--y2k-window); box-shadow: 2px 2px 0 var(--y2k-shadow);
+}
+:root[data-theme="y2k"] .retry-btn:hover,
+:root[data-theme="y2k"] .watch-nav-btn:hover:not(:disabled),
+:root[data-theme="y2k"] .slide-nav:hover,
+:root[data-theme="y2k"] .episode-btn:hover { background: var(--y2k-mint); color: var(--y2k-on-fill); }
+:root[data-theme="y2k"] .episode-btn.active,
+:root[data-theme="y2k"] .season-btn.active,
+:root[data-theme="y2k"] .watch-season-pill.active,
+:root[data-theme="y2k"] .seg-opt:has(input:checked) {
+  background: var(--y2k-title-bar); color: var(--y2k-ink); box-shadow: inset 0 0 0 2px var(--y2k-ink);
+}
+
+/* Inset shadow reads as a recessed field, which is the era-correct input. */
+:root[data-theme="y2k"] .input,
+:root[data-theme="y2k"] .seg,
+:root[data-theme="y2k"] .search-trigger {
+  border: 2px solid var(--y2k-ink); background: var(--y2k-field);
+  box-shadow: inset 2px 2px 0 rgba(10, 7, 24, 0.55);
+  font-weight: 700;
+}
+:root[data-theme="y2k"] .input:focus-visible,
+:root[data-theme="y2k"] .search-trigger:hover { border-color: var(--color-accent); }
+:root[data-theme="y2k"] .search-trigger kbd { border: 2px solid var(--y2k-ink); background: var(--y2k-lemon); color: var(--y2k-on-fill); font-weight: 700; }
+
+/* Surfaces become windows: 2px ink outline plus a hard drop. */
+:root[data-theme="y2k"] .card,
+:root[data-theme="y2k"] .watch-settings,
+:root[data-theme="y2k"] .watch-ep-card,
+:root[data-theme="y2k"] .watch-rec-row,
+:root[data-theme="y2k"] .watch-poster-card,
+:root[data-theme="y2k"] .stream-dropdown,
+:root[data-theme="y2k"] .update-status:not(:empty),
+:root[data-theme="y2k"] .poster-card .poster-image-wrap,
+:root[data-theme="y2k"] .see-all-card,
+:root[data-theme="y2k"] .media-details img {
+  border: 2px solid var(--y2k-ink); box-shadow: 4px 4px 0 var(--y2k-shadow);
+}
+:root[data-theme="y2k"] .poster-card:hover .poster-image-wrap,
+:root[data-theme="y2k"] .poster-card:focus-within .poster-image-wrap,
+:root[data-theme="y2k"] .watch-ep-card:hover,
+:root[data-theme="y2k"] .watch-rec-row:hover,
+:root[data-theme="y2k"] .poster-card:hover .see-all-card {
+  border-color: var(--y2k-ink); box-shadow: 6px 6px 0 var(--color-accent);
+}
+:root[data-theme="y2k"] .update-status { background: var(--y2k-field); font-family: var(--font-mono); font-size: 1.05em; }
+
+/* Section headings become title bars — the Y2K window idea applied to a page
+   that has no actual windows to drag. */
+:root[data-theme="y2k"] .settings-section {
+  border: 2px solid var(--y2k-ink); background: var(--y2k-window);
+  box-shadow: 4px 4px 0 var(--y2k-shadow);
+  padding: 0 var(--space-6) var(--space-6);
+  margin-bottom: var(--space-6);
+}
+:root[data-theme="y2k"] .settings-section:first-child { padding-top: 0; }
+:root[data-theme="y2k"] .settings-section > .section-heading {
+  background: var(--y2k-title-bar);
+  border-bottom: 2px solid var(--y2k-ink);
+  margin: 0 calc(-1 * var(--space-6)) var(--space-6);
+  padding: 8px var(--space-6);
+  display: flex; align-items: center; gap: 8px;
+}
+
+:root[data-theme="y2k"] .nav {
+  background: var(--y2k-title-bar);
+  border-bottom: 3px solid var(--y2k-ink);
+}
+:root[data-theme="y2k"] .nav-item { font-family: var(--font-heading); font-size: 9px; color: var(--y2k-ink); }
+:root[data-theme="y2k"] .nav-item.active::after { height: 3px; background: var(--y2k-ink); }
+:root[data-theme="y2k"] .nav .btn-icon { border: 2px solid var(--y2k-ink); background: var(--y2k-window); box-shadow: 2px 2px 0 var(--y2k-shadow); }
+:root[data-theme="y2k"] .nav .btn-icon:hover { background: var(--y2k-lemon); color: var(--y2k-on-fill); border-color: var(--y2k-ink); }
+:root[data-theme="y2k"] .notif-badge { background: var(--color-accent); color: var(--y2k-on-fill); border: 1px solid var(--y2k-ink); font-weight: 700; }
+
+/* The brand dot is the first sparkle — a square pixel that pulses and spins. */
+:root[data-theme="y2k"] .nav-brand-dot {
+  background: var(--color-accent); box-shadow: none;
+  animation: y2k-sparkle 3s linear infinite;
+}
+@keyframes y2k-sparkle {
+  0%, 100% { transform: scale(1) rotate(0deg); opacity: 1; }
+  50%      { transform: scale(1.35) rotate(180deg); opacity: 0.7; }
+}
+
+/* Text is light again, so the backdrop keeps its darkening — and takes a
+   violet cast so artwork sits inside the palette rather than on top of it. */
+:root[data-theme="y2k"] .hero-backdrop { filter: brightness(0.45) saturate(0.9) hue-rotate(-8deg); }
+:root[data-theme="y2k"] .hero { border: 3px solid var(--y2k-ink); box-shadow: 6px 6px 0 var(--y2k-shadow); }
+:root[data-theme="y2k"] .hero-content .tag,
+:root[data-theme="y2k"] .watch-kicker-row { font-family: var(--font-heading); font-size: 8px; letter-spacing: 0.06em; color: var(--color-accent); }
+:root[data-theme="y2k"] .hero-content .tag::before,
+:root[data-theme="y2k"] .watch-kicker-bar { background: var(--color-accent); height: 3px; }
+:root[data-theme="y2k"] .details-backdrop { border: 3px solid var(--y2k-ink); }
+
+:root[data-theme="y2k"] .poster-score,
+:root[data-theme="y2k"] .poster-countdown,
+:root[data-theme="y2k"] .watch-ep-badge,
+:root[data-theme="y2k"] .watch-rating-chip {
+  background: var(--y2k-lemon); color: var(--y2k-on-fill);
+  border: 2px solid var(--y2k-ink); font-weight: 700;
+}
+:root[data-theme="y2k"] .poster-countdown { background: var(--y2k-mint); }
+:root[data-theme="y2k"] .tag-accent { background: var(--y2k-title-bar); color: var(--y2k-ink); border: 2px solid var(--y2k-ink); }
+:root[data-theme="y2k"] .tag-outline { border: 2px solid var(--y2k-ink); color: var(--y2k-ink); }
+
+/* Barber-pole fill — the era universal "something is happening". */
+:root[data-theme="y2k"] .download-progress-bar,
+:root[data-theme="y2k"] .continue-progress { border: 2px solid var(--y2k-ink); background: var(--y2k-field); height: 14px; }
+:root[data-theme="y2k"] .download-progress-fill,
+:root[data-theme="y2k"] .continue-progress-fill,
+:root[data-theme="y2k"] .watch-ep-progress-fill {
+  background: repeating-linear-gradient(45deg,
+    var(--y2k-lemon) 0 8px, var(--y2k-ink) 8px 10px);
+  animation: y2k-progress-march 0.6s linear infinite;
+}
+@keyframes y2k-progress-march { from { background-position: 0 0; } to { background-position: 14px 0; } }
+
+:root[data-theme="y2k"] .watch-player {
+  background: var(--y2k-window); border: 3px solid var(--y2k-ink); box-shadow: 6px 6px 0 var(--y2k-shadow);
+}
+:root[data-theme="y2k"] .watch-player-glow { background: none; }
+:root[data-theme="y2k"] .watch-player-bar { background: linear-gradient(0deg, rgba(22,18,43,0.96) 30%, transparent 100%); }
+:root[data-theme="y2k"] .player-play-circle { border: 3px solid var(--y2k-ink); background: var(--y2k-lemon); color: var(--y2k-on-fill); box-shadow: 4px 4px 0 var(--y2k-shadow); }
+:root[data-theme="y2k"] .player-play-circle:hover:not(:disabled) { background: var(--y2k-mint); transform: none; }
+:root[data-theme="y2k"] .watch-status-dot { background: var(--color-accent); box-shadow: none; animation: y2k-sparkle 2s linear infinite; }
+
+:root[data-theme="y2k"] .dialog-backdrop { background: rgba(10, 7, 24, 0.66); }
+:root[data-theme="y2k"] .dialog { border: 3px solid var(--y2k-ink); box-shadow: 8px 8px 0 var(--y2k-shadow); }
+:root[data-theme="y2k"] .dialog input {
+  border-bottom: 3px solid var(--y2k-ink); font-weight: 700;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 256 256' fill='%23ff7ac6'%3E%3Cpath d='M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z'%3E%3C/path%3E%3C/svg%3E");
+}
+:root[data-theme="y2k"] .dialog-item:hover { background: var(--y2k-title-bar); }
+:root[data-theme="y2k"] .dialog-section-label { font-family: var(--font-heading); font-size: 8px; }
+
+:root[data-theme="y2k"] .trending-item { border-bottom: 2px solid var(--y2k-ink); }
+:root[data-theme="y2k"] .trending-item img { border: 2px solid var(--y2k-ink); }
+:root[data-theme="y2k"] .trending-rank { font-family: var(--font-heading); font-size: 8px; color: var(--color-accent); }
+:root[data-theme="y2k"] .notif-item:hover { background: var(--y2k-title-bar); }
+:root[data-theme="y2k"] .footer { font-family: var(--font-heading); font-size: 8px; }
+
+/* Chunky square scrollbars, no track rounding. */
+:root[data-theme="y2k"] ::-webkit-scrollbar { width: 14px; height: 14px; }
+:root[data-theme="y2k"] ::-webkit-scrollbar-track { background: var(--y2k-field); border-left: 2px solid var(--y2k-ink); }
+:root[data-theme="y2k"] ::-webkit-scrollbar-thumb { background: var(--y2k-title-bar); border: 2px solid var(--y2k-ink); }
+:root[data-theme="y2k"] ::-webkit-scrollbar-thumb:hover { background: var(--y2k-mint); }
+:root[data-theme="y2k"] .content::-webkit-scrollbar,
+:root[data-theme="y2k"] .season-buttons::-webkit-scrollbar { width: 14px; height: 12px; }
+:root[data-theme="y2k"] .content::-webkit-scrollbar-thumb,
+:root[data-theme="y2k"] .season-buttons::-webkit-scrollbar-thumb { background: var(--y2k-title-bar); border: 2px solid var(--y2k-ink); }
+
+/* Views pop in like a window opening rather than fading. */
+@keyframes y2k-window-spawn {
+  from { transform: scale(0.94); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+:root[data-theme="y2k"] .view { animation: y2k-window-spawn 220ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme="y2k"] .view,
+  :root[data-theme="y2k"] .nav-brand-dot,
+  :root[data-theme="y2k"] .watch-status-dot,
+  :root[data-theme="y2k"] .download-progress-fill,
+  :root[data-theme="y2k"] .continue-progress-fill,
+  :root[data-theme="y2k"] .watch-ep-progress-fill { animation: none; }
+  :root[data-theme="y2k"] .btn:not(:disabled):active { transform: none; }
+}
+
+/* ---------------------------------------------------------------------
+   Theme: Terminal
+   ---------------------------------------------------------------------
+   Phosphor console. Selected via <html data-theme="terminal">, same
+   mechanism as Y2K, and dark-only for the same reason in reverse: the look
+   is light-on-black glow, which has no light-mode equivalent.
+
+   Where Y2K is chunky and opaque, this is thin and lit — 1px rules instead
+   of 2px slabs, glow instead of offset shadow, one monospace face at every
+   size. Contrast is deliberately generous (body 14:1, accent 15:1, muted
+   7:1 against the ground) because saturated green on near-black is the
+   palette most likely to fail if picked by eye.
+   --------------------------------------------------------------------- */
+
+:root[data-theme="terminal"] {
+  --term-ink: #0a0e0a;
+  --term-glow: #39ff14;
+  --term-line: rgba(57, 255, 20, 0.22);
+
+  --color-bg: var(--term-ink);
+  --color-surface: #0f150f;
+  --color-raise: #131a13;
+  --color-text: #c8f7c5;
+  --color-accent: var(--term-glow);
+  --color-accent-2: #7dff5e;
+  --color-accent-400: #7dff5e;
+  --color-divider: var(--term-line);
+
+  --color-muted: #7fa87c;
+  --color-subtle: #6b9468;
+
+  --poster-gradient: linear-gradient(150deg, #162116, #0d130d 60%, #131c13);
+
+  /* Skeleton shimmer only — the rest of the neutral ramp has no reader. */
+  --color-neutral-700: #24361f;
+  --color-neutral-800: #162014;
+
+  --font-heading: "JetBrains Mono", ui-monospace, "Courier New", monospace;
+  --font-heading-weight: 700;
+  --font-body: "JetBrains Mono", ui-monospace, "Courier New", monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+
+  /* A hairline ring plus bloom, rather than a cast shadow — light sources
+     on a CRT spread, they do not fall. */
+  --shadow-sm: 0 0 0 1px rgba(57, 255, 20, 0.25);
+  --shadow-md: 0 0 0 1px rgba(57, 255, 20, 0.35), 0 0 18px rgba(57, 255, 20, 0.08);
+  --shadow-lg: 0 0 0 1px rgba(57, 255, 20, 0.5), 0 0 32px rgba(57, 255, 20, 0.14);
+  --shadow-hover: 0 0 0 1px var(--term-glow), 0 0 24px rgba(57, 255, 20, 0.22);
+}
+
+/* Same reasoning as the Y2K block: 22 hardcoded radii no token reaches, and
+   square is the correct answer for this theme too. */
+:root[data-theme="terminal"] * { border-radius: 0 !important; }
+
+:root[data-theme="terminal"] body { font-size: 14px; letter-spacing: 0.01em; }
+
+/* Scanlines. Fixed and non-interactive so it rides over the whole app
+   including dialogs, which is where a real CRT overlay would sit. Kept at
+   4% so it textures the surface without touching text legibility. */
+:root[data-theme="terminal"] body::after {
+  content: '';
+  position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+  background: repeating-linear-gradient(
+    rgba(57, 255, 20, 0.04) 0 1px, transparent 1px 3px);
+}
+
+:root[data-theme="terminal"] h1, :root[data-theme="terminal"] h2,
+:root[data-theme="terminal"] h3, :root[data-theme="terminal"] h4,
+:root[data-theme="terminal"] h5, :root[data-theme="terminal"] h6,
+:root[data-theme="terminal"] .page-title {
+  letter-spacing: 0.02em; text-transform: uppercase;
+}
+:root[data-theme="terminal"] h1, :root[data-theme="terminal"] .page-title { font-size: 27px; }
+:root[data-theme="terminal"] h2 { font-size: 22px; }
+:root[data-theme="terminal"] h3 { font-size: 18px; }
+:root[data-theme="terminal"] .hero-content h1,
+:root[data-theme="terminal"] .hero-content h2 { font-size: clamp(26px, 3.4vw, 40px); letter-spacing: 0.01em; }
+
+/* Headings read as shell prompts; the page title carries the cursor. */
+:root[data-theme="terminal"] .section-heading::before,
+:root[data-theme="terminal"] .sidebar-heading::before,
+:root[data-theme="terminal"] .card-title::before {
+  content: '> '; color: var(--term-glow);
+}
+:root[data-theme="terminal"] .page-title::after {
+  content: '_'; color: var(--term-glow); margin-left: 2px;
+  animation: term-blink 1.1s steps(1) infinite;
+}
+@keyframes term-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+
+:root[data-theme="terminal"] a,
+:root[data-theme="terminal"] .nav-item.active,
+:root[data-theme="terminal"] .trending-rank,
+:root[data-theme="terminal"] .watch-ep-state,
+:root[data-theme="terminal"] .poster-score { text-shadow: 0 0 8px rgba(57, 255, 20, 0.45); }
+:root[data-theme="terminal"] .trending-rank { color: var(--term-glow); }
+
+/* Buttons wear brackets, the way a console offers a choice. .btn is
+   inline-flex with a gap, so the pseudo-elements sit as flex items and read
+   as "[ LABEL ]"; icon-only and ghost buttons opt out. */
+:root[data-theme="terminal"] .btn {
+  text-transform: uppercase; letter-spacing: 0.06em; font-size: 12px;
+  border: 1px solid var(--term-line); background: transparent; color: var(--color-text);
+}
+:root[data-theme="terminal"] .btn-primary:not(.btn-icon)::before,
+:root[data-theme="terminal"] .btn-secondary:not(.btn-icon)::before { content: '['; color: var(--term-glow); }
+:root[data-theme="terminal"] .btn-primary:not(.btn-icon)::after,
+:root[data-theme="terminal"] .btn-secondary:not(.btn-icon)::after { content: ']'; color: var(--term-glow); }
+:root[data-theme="terminal"] .btn-primary {
+  background: rgba(57, 255, 20, 0.12); border-color: var(--term-glow); color: var(--term-glow);
+}
+:root[data-theme="terminal"] .btn-primary:hover,
+:root[data-theme="terminal"] .btn-secondary:hover {
+  background: rgba(57, 255, 20, 0.18); border-color: var(--term-glow); color: var(--term-glow);
+  box-shadow: 0 0 16px rgba(57, 255, 20, 0.25);
+}
+:root[data-theme="terminal"] .btn-ghost { border-color: transparent; }
+:root[data-theme="terminal"] .btn-ghost:hover { background: rgba(57, 255, 20, 0.12); }
+/* Same specificity trap the Y2K block hit: the .btn rule above outranks the
+   plain .btn-icon box, so the icon square has to restate it. */
+:root[data-theme="terminal"] .btn-icon { width: 34px; height: 34px; padding: 0; }
+
+:root[data-theme="terminal"] .retry-btn,
+:root[data-theme="terminal"] .watch-nav-btn,
+:root[data-theme="terminal"] .slide-nav,
+:root[data-theme="terminal"] .episode-btn,
+:root[data-theme="terminal"] .season-btn {
+  border: 1px solid var(--term-line); text-transform: uppercase; letter-spacing: 0.04em;
+}
+:root[data-theme="terminal"] .retry-btn:hover,
+:root[data-theme="terminal"] .watch-nav-btn:hover:not(:disabled),
+:root[data-theme="terminal"] .slide-nav:hover,
+:root[data-theme="terminal"] .episode-btn:hover,
+:root[data-theme="terminal"] .season-btn:hover {
+  border-color: var(--term-glow); color: var(--term-glow); box-shadow: 0 0 14px rgba(57, 255, 20, 0.2);
+}
+:root[data-theme="terminal"] .episode-btn.active,
+:root[data-theme="terminal"] .season-btn.active,
+:root[data-theme="terminal"] .watch-season-pill.active,
+:root[data-theme="terminal"] .seg-opt:has(input:checked) {
+  color: var(--term-glow); background: rgba(57, 255, 20, 0.14);
+  box-shadow: inset 0 0 0 1px var(--term-glow);
+}
+
+:root[data-theme="terminal"] .input,
+:root[data-theme="terminal"] .seg,
+:root[data-theme="terminal"] .search-trigger {
+  background: #060906; border: 1px solid var(--term-line); color: var(--color-text);
+}
+:root[data-theme="terminal"] .input:focus-visible,
+:root[data-theme="terminal"] .search-trigger:hover {
+  border-color: var(--term-glow); box-shadow: 0 0 14px rgba(57, 255, 20, 0.22);
+}
+/* JetBrains Mono sets wider than Geist, so the placeholder no longer fits the
+   300px trigger and wraps the whole nav onto a second row. Clip it instead of
+   widening, which would just move the break point. */
+:root[data-theme="terminal"] .trigger-label {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+:root[data-theme="terminal"] .search-trigger kbd {
+  background: transparent; border: 1px solid var(--term-line); color: var(--term-glow);
+}
+
+:root[data-theme="terminal"] .nav {
+  background: #070b07; border-bottom: 1px solid var(--term-line); backdrop-filter: none;
+}
+:root[data-theme="terminal"] .nav-item { text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; }
+:root[data-theme="terminal"] .nav-item.active::after { background: var(--term-glow); box-shadow: 0 0 10px var(--term-glow); }
+:root[data-theme="terminal"] .nav .btn-icon:hover { background: rgba(57, 255, 20, 0.12); color: var(--term-glow); }
+:root[data-theme="terminal"] .notif-badge { background: var(--term-glow); color: var(--term-ink); }
+
+/* The brand dot is a blinking block cursor. */
+:root[data-theme="terminal"] .nav-brand { text-transform: uppercase; letter-spacing: 0.1em; }
+:root[data-theme="terminal"] .nav-brand-dot {
+  width: 9px; height: 15px; background: var(--term-glow); box-shadow: 0 0 10px var(--term-glow);
+  animation: term-blink 1.1s steps(1) infinite;
+}
+
+/* Darkened further than Nocturne and desaturated: artwork should read as
+   something rendered on the console, not pasted onto it. */
+:root[data-theme="terminal"] .hero-backdrop { filter: brightness(0.4) saturate(0.55); }
+:root[data-theme="terminal"] .hero,
+:root[data-theme="terminal"] .details-backdrop { border: 1px solid var(--term-line); }
+:root[data-theme="terminal"] .hero-content .tag,
+:root[data-theme="terminal"] .watch-kicker-row { color: var(--term-glow); letter-spacing: 0.24em; }
+:root[data-theme="terminal"] .hero-content .tag::before,
+:root[data-theme="terminal"] .watch-kicker-bar { background: var(--term-glow); box-shadow: 0 0 8px var(--term-glow); }
+
+:root[data-theme="terminal"] .card,
+:root[data-theme="terminal"] .watch-settings,
+:root[data-theme="terminal"] .watch-ep-card,
+:root[data-theme="terminal"] .watch-rec-row,
+:root[data-theme="terminal"] .watch-poster-card,
+:root[data-theme="terminal"] .stream-dropdown,
+:root[data-theme="terminal"] .see-all-card,
+:root[data-theme="terminal"] .poster-card .poster-image-wrap,
+:root[data-theme="terminal"] .media-details img { border: 1px solid var(--term-line); }
+:root[data-theme="terminal"] .poster-card:hover .poster-image-wrap,
+:root[data-theme="terminal"] .poster-card:focus-within .poster-image-wrap,
+:root[data-theme="terminal"] .watch-ep-card:hover,
+:root[data-theme="terminal"] .watch-rec-row:hover,
+:root[data-theme="terminal"] .poster-card:hover .see-all-card {
+  border-color: var(--term-glow); box-shadow: var(--shadow-hover);
+}
+:root[data-theme="terminal"] .media-details img { box-shadow: 0 0 30px rgba(57, 255, 20, 0.1); }
+
+:root[data-theme="terminal"] .poster-score,
+:root[data-theme="terminal"] .poster-countdown,
+:root[data-theme="terminal"] .watch-ep-badge,
+:root[data-theme="terminal"] .watch-rating-chip {
+  background: rgba(6, 9, 6, 0.82); border: 1px solid var(--term-line); backdrop-filter: none;
+}
+:root[data-theme="terminal"] .tag-accent,
+:root[data-theme="terminal"] .tag-outline {
+  background: transparent; border: 1px solid var(--term-line); color: var(--color-muted);
+}
+:root[data-theme="terminal"] .settings-section { border-bottom: 1px solid var(--term-line); }
+
+:root[data-theme="terminal"] .download-progress-bar,
+:root[data-theme="terminal"] .continue-progress,
+:root[data-theme="terminal"] .watch-ep-progress-track { background: #060906; border: 1px solid var(--term-line); }
+:root[data-theme="terminal"] .download-progress-fill,
+:root[data-theme="terminal"] .continue-progress-fill,
+:root[data-theme="terminal"] .watch-ep-progress-fill {
+  background: var(--term-glow); box-shadow: 0 0 10px var(--term-glow);
+}
+
+:root[data-theme="terminal"] .watch-player {
+  background: radial-gradient(120% 100% at 50% 40%, #101a10, var(--term-ink) 70%);
+  border: 1px solid var(--term-line); box-shadow: 0 0 40px rgba(57, 255, 20, 0.08);
+}
+:root[data-theme="terminal"] .watch-player-glow {
+  background: radial-gradient(60% 60% at 50% 42%, rgba(57, 255, 20, 0.1), transparent 70%);
+}
+:root[data-theme="terminal"] .watch-player-bar { background: linear-gradient(0deg, rgba(6, 9, 6, 0.94) 6%, transparent 90%); }
+:root[data-theme="terminal"] .player-play-circle {
+  border: 1px solid var(--term-glow); color: var(--term-glow); box-shadow: 0 0 22px rgba(57, 255, 20, 0.22);
+}
+:root[data-theme="terminal"] .watch-status-dot { background: var(--term-glow); box-shadow: 0 0 10px var(--term-glow); }
+:root[data-theme="terminal"] .update-status { background: #060906; border: 1px solid var(--term-line); }
+
+:root[data-theme="terminal"] .dialog-backdrop { background: rgba(2, 5, 2, 0.7); }
+:root[data-theme="terminal"] .dialog { border: 1px solid var(--term-glow); }
+:root[data-theme="terminal"] .dialog input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 256 256' fill='%2339ff14'%3E%3Cpath d='M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z'%3E%3C/path%3E%3C/svg%3E");
+}
+:root[data-theme="terminal"] .dialog-section-label { color: var(--term-glow); }
+:root[data-theme="terminal"] .dialog-item:hover,
+:root[data-theme="terminal"] .notif-item:hover { background: rgba(57, 255, 20, 0.1); }
+:root[data-theme="terminal"] .trending-item:hover { color: var(--term-glow); }
+
+:root[data-theme="terminal"] ::-webkit-scrollbar-thumb,
+:root[data-theme="terminal"] .content::-webkit-scrollbar-thumb,
+:root[data-theme="terminal"] .season-buttons::-webkit-scrollbar-thumb { background: rgba(57, 255, 20, 0.3); }
+:root[data-theme="terminal"] ::-webkit-scrollbar-thumb:hover { background: var(--term-glow); }
+:root[data-theme="terminal"] ::selection { background: rgba(57, 255, 20, 0.3); }
+
+:root[data-theme="terminal"] .footer { text-transform: uppercase; letter-spacing: 0.12em; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme="terminal"] .page-title::after,
+  :root[data-theme="terminal"] .nav-brand-dot { animation: none; }
+}
+
+:root[data-theme="terminal"] .theme-option { border-color: var(--term-line); }
+:root[data-theme="terminal"] .theme-option-name { text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* ---------------------------------------------------------------------
+   Theme: Vintage
+   ---------------------------------------------------------------------
+   Faded film stock. Light-only, selected via <html data-theme="vintage">.
+
+   The one theme here that is NOT square: photographs have corners, so the
+   radius tokens stay small-but-present rather than being zeroed, and
+   shadows fall softly instead of glowing or offsetting. That, plus a serif
+   display face, is what separates it from Y2K and Neubrutalist, which are
+   the other two light themes.
+
+   The palette's muted teal (#4a7b7c) and sepia only ever fill; the text
+   accent is a darkened teal, because the source teal lands at 3.5:1 on
+   cream and would fail on every link in the app.
+   --------------------------------------------------------------------- */
+
+:root[data-theme="vintage"] {
+  --va-cream: #f5e6c8;
+  --va-ink: #3a2e21;
+  --va-sepia: #d4a574;
+  --va-teal-fill: #4a7b7c;
+  --va-pink: #e8b4b8;
+  --va-frame: #fffaf0;
+
+  --color-bg: var(--va-cream);
+  --color-surface: #fbf3e2;
+  --color-raise: var(--va-frame);
+  --color-text: var(--va-ink);
+  --color-accent: #2f5b5c;
+  --color-accent-2: var(--va-teal-fill);
+  --color-accent-400: #7d3b40;
+  --color-divider: rgba(58, 46, 33, 0.22);
+
+  --color-muted: #6b5b47;
+  --color-subtle: #5a4a38;
+
+  --poster-gradient: linear-gradient(150deg, #e6d3b0, #d9c49d 60%, #e3d0ac);
+
+  --color-neutral-700: #dfcba6;
+  --color-neutral-800: #ecdcbe;
+
+  --font-heading: "Abril Fatface", Georgia, "Times New Roman", serif;
+  --font-heading-weight: 400;
+  --font-body: "Merriweather", Georgia, serif;
+  /* Still a true monospace: this drives countdowns and scores, and
+     proportional digits visibly jitter as they tick. */
+  --font-mono: "Courier New", ui-monospace, monospace;
+
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 5px;
+
+  --shadow-sm: 0 0 0 1px rgba(58, 46, 33, 0.16);
+  --shadow-md: 0 1px 3px rgba(58, 46, 33, 0.18), 0 6px 16px rgba(58, 46, 33, 0.1);
+  --shadow-lg: 0 10px 30px rgba(58, 46, 33, 0.2);
+  --shadow-hover: 0 12px 26px rgba(58, 46, 33, 0.24);
+}
+
+/* Film grain, generated rather than bundled — a texture asset would have to
+   ship inside the Tauri binary, and feTurbulence costs nothing to carry. */
+:root[data-theme="vintage"] body::after {
+  content: '';
+  position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+  opacity: 0.07; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+/* Light leak — a warm bloom bled in from the top-right corner, the way an
+   unsealed camera back fogs the edge of a frame. */
+:root[data-theme="vintage"] body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 1; pointer-events: none;
+  background:
+    radial-gradient(46% 34% at 100% 0%, rgba(232, 180, 184, 0.34), transparent 68%),
+    radial-gradient(34% 26% at 0% 100%, rgba(212, 165, 116, 0.24), transparent 70%);
+}
+
+:root[data-theme="vintage"] h1, :root[data-theme="vintage"] h2,
+:root[data-theme="vintage"] h3, :root[data-theme="vintage"] .page-title {
+  letter-spacing: 0; line-height: 1.18;
+}
+:root[data-theme="vintage"] .section-heading,
+:root[data-theme="vintage"] .card-title { font-size: 19px; }
+:root[data-theme="vintage"] .sidebar-heading { font-family: var(--font-heading); font-size: 15px; letter-spacing: 0.06em; }
+:root[data-theme="vintage"] .hero-content h1,
+:root[data-theme="vintage"] .hero-content h2 { letter-spacing: 0; line-height: 1.1; }
+:root[data-theme="vintage"] body { font-size: 14px; }
+
+:root[data-theme="vintage"] .nav {
+  background: #f0dfbe; border-bottom: 1px solid var(--color-divider); backdrop-filter: none;
+}
+:root[data-theme="vintage"] .nav-brand { font-family: var(--font-heading); letter-spacing: 0.02em; }
+:root[data-theme="vintage"] .nav-brand-dot { background: var(--va-teal-fill); box-shadow: none; }
+:root[data-theme="vintage"] .nav-item.active::after { background: var(--color-accent); }
+
+:root[data-theme="vintage"] .btn { font-family: var(--font-body); font-weight: 700; font-size: 13px; }
+:root[data-theme="vintage"] .btn-primary { background: var(--color-accent); color: var(--va-frame); border-color: var(--color-accent); }
+:root[data-theme="vintage"] .btn-primary:hover { background: #24494a; border-color: #24494a; }
+:root[data-theme="vintage"] .btn-secondary { background: var(--va-frame); border-color: var(--color-divider); }
+:root[data-theme="vintage"] .btn-secondary:hover { background: var(--va-pink); border-color: var(--va-ink); color: var(--va-ink); }
+:root[data-theme="vintage"] .input,
+:root[data-theme="vintage"] .search-trigger { background: var(--va-frame); border-color: var(--color-divider); }
+
+/* Posters sit in a photo frame with the deep bottom margin of a polaroid. */
+:root[data-theme="vintage"] .poster-card .poster-image-wrap,
+:root[data-theme="vintage"] .watch-poster-img,
+:root[data-theme="vintage"] .media-details img {
+  border: 6px solid var(--va-frame); border-bottom-width: 16px;
+  box-shadow: 0 2px 4px rgba(58, 46, 33, 0.2), 0 10px 22px rgba(58, 46, 33, 0.14);
+}
+:root[data-theme="vintage"] .poster-card img,
+:root[data-theme="vintage"] .watch-ep-thumb,
+:root[data-theme="vintage"] .trending-item img { filter: sepia(0.3) saturate(0.88) contrast(0.96); }
+:root[data-theme="vintage"] .poster-card:hover .poster-image-wrap,
+:root[data-theme="vintage"] .poster-card:focus-within .poster-image-wrap { border-color: #fff; }
+
+:root[data-theme="vintage"] .hero-backdrop { filter: sepia(0.38) saturate(0.8) brightness(0.52); }
+:root[data-theme="vintage"] .hero,
+:root[data-theme="vintage"] .details-backdrop { border: 1px solid var(--color-divider); }
+:root[data-theme="vintage"] .hero-content .tag,
+:root[data-theme="vintage"] .watch-kicker-row { color: var(--color-accent); }
+:root[data-theme="vintage"] .hero-content .tag::before,
+:root[data-theme="vintage"] .watch-kicker-bar { background: var(--color-accent); }
+
+:root[data-theme="vintage"] .card,
+:root[data-theme="vintage"] .watch-settings,
+:root[data-theme="vintage"] .watch-ep-card,
+:root[data-theme="vintage"] .watch-rec-row,
+:root[data-theme="vintage"] .watch-poster-card,
+:root[data-theme="vintage"] .stream-dropdown,
+:root[data-theme="vintage"] .update-status { background: var(--va-frame); border-color: var(--color-divider); }
+:root[data-theme="vintage"] .settings-section { border-bottom-color: var(--color-divider); }
+
+:root[data-theme="vintage"] .tag-accent { background: var(--va-pink); color: var(--va-ink); }
+:root[data-theme="vintage"] .tag-outline { border-color: var(--color-accent); color: var(--color-accent); }
+:root[data-theme="vintage"] .poster-score { background: rgba(255, 250, 240, 0.92); color: var(--color-accent); backdrop-filter: none; }
+:root[data-theme="vintage"] .poster-countdown,
+:root[data-theme="vintage"] .watch-ep-badge,
+:root[data-theme="vintage"] .watch-rating-chip { background: rgba(255, 250, 240, 0.92); color: var(--va-ink); backdrop-filter: none; }
+
+:root[data-theme="vintage"] .download-progress-bar,
+:root[data-theme="vintage"] .continue-progress { background: rgba(58, 46, 33, 0.18); }
+:root[data-theme="vintage"] .download-progress-fill,
+:root[data-theme="vintage"] .continue-progress-fill,
+:root[data-theme="vintage"] .watch-ep-progress-fill { background: var(--va-teal-fill); }
+
+:root[data-theme="vintage"] .watch-player {
+  background: radial-gradient(120% 100% at 50% 40%, #efdcba, var(--va-cream) 70%);
+  border-color: var(--color-divider); box-shadow: var(--shadow-lg);
+}
+:root[data-theme="vintage"] .watch-player-glow { background: none; }
+:root[data-theme="vintage"] .watch-player-bar { background: linear-gradient(0deg, rgba(245, 230, 200, 0.95) 6%, transparent 90%); }
+:root[data-theme="vintage"] .player-play-circle { border-color: var(--color-accent); background: var(--va-frame); color: var(--color-accent); }
+:root[data-theme="vintage"] .watch-status-dot { background: var(--va-teal-fill); box-shadow: none; }
+
+:root[data-theme="vintage"] .dialog-backdrop { background: rgba(58, 46, 33, 0.48); backdrop-filter: none; }
+:root[data-theme="vintage"] .dialog { background: var(--va-frame); }
+:root[data-theme="vintage"] .dialog input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 256 256' fill='%232f5b5c'%3E%3Cpath d='M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z'%3E%3C/path%3E%3C/svg%3E");
+}
+:root[data-theme="vintage"] .trending-rank { font-family: var(--font-heading); color: var(--color-accent); }
+:root[data-theme="vintage"] ::-webkit-scrollbar-thumb,
+:root[data-theme="vintage"] .content::-webkit-scrollbar-thumb { background: rgba(58, 46, 33, 0.28); }
+:root[data-theme="vintage"] .footer { font-family: var(--font-heading); letter-spacing: 0.04em; }
+
+:root[data-theme="vintage"] .theme-option-name { font-family: var(--font-heading); font-weight: 400; font-size: 15px; }
+
+/* ---------------------------------------------------------------------
+   Theme: Neubrutalist
+   ---------------------------------------------------------------------
+   Pure black rules, primary blocks, and a display grotesque at poster size.
+
+   Deliberately pulled away from Y2K, the theme it is closest to: black
+   instead of navy, 3px instead of 2px, an 8px shadow throw instead of 4px,
+   a flat bone ground instead of a blue grid, and a heavy grotesque instead
+   of a pixel face. Same family of idea, different execution.
+
+   The source palette's blue (#2196f3) reaches only 2.9:1 on the ground, so
+   it fills but never carries text; links use a darkened blue instead.
+   --------------------------------------------------------------------- */
+
+:root[data-theme="neubrutalist"] {
+  --nb-ink: #000000;
+  --nb-yellow: #ffeb3b;
+  --nb-red: #ff5252;
+  --nb-blue: #2196f3;
+
+  --color-bg: #f6f4ec;
+  --color-surface: #ffffff;
+  --color-raise: #ffffff;
+  --color-text: var(--nb-ink);
+  --color-accent: #0f4fc7;
+  --color-accent-2: #1565d8;
+  --color-accent-400: #b3122f;
+  --color-divider: var(--nb-ink);
+
+  --color-muted: #3d3d3d;
+  --color-subtle: #2b2b2b;
+
+  --poster-gradient: linear-gradient(150deg, #e8e4d6, #dedac9 60%, #e4e0d1);
+
+  --color-neutral-700: #d8d4c4;
+  --color-neutral-800: #eceae0;
+
+  --font-heading: "Archivo Black", Impact, "Arial Black", sans-serif;
+  --font-heading-weight: 400;
+  --font-body: "Archivo", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Courier New", monospace;
+
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+
+  --shadow-sm: 3px 3px 0 var(--nb-ink);
+  --shadow-md: 5px 5px 0 var(--nb-ink);
+  --shadow-lg: 8px 8px 0 var(--nb-ink);
+  --shadow-hover: 6px 6px 0 var(--nb-ink);
+}
+
+:root[data-theme="neubrutalist"] * { border-radius: 0 !important; }
+:root[data-theme="neubrutalist"] .nav,
+:root[data-theme="neubrutalist"] .dialog-backdrop,
+:root[data-theme="neubrutalist"] .poster-score,
+:root[data-theme="neubrutalist"] .poster-countdown,
+:root[data-theme="neubrutalist"] .continue-remove { backdrop-filter: none; }
+
+:root[data-theme="neubrutalist"] body { font-weight: 500; }
+
+/* Extreme scale contrast is the whole point of the style — the display
+   sizes go up, not down, and the body text stays ordinary. */
+:root[data-theme="neubrutalist"] h1,
+:root[data-theme="neubrutalist"] .page-title { font-size: 52px; line-height: 0.98; letter-spacing: -0.03em; text-transform: uppercase; }
+:root[data-theme="neubrutalist"] h2 { font-size: 36px; line-height: 1.02; letter-spacing: -0.02em; }
+:root[data-theme="neubrutalist"] h3 { font-size: 26px; line-height: 1.08; }
+:root[data-theme="neubrutalist"] .hero-content h1,
+:root[data-theme="neubrutalist"] .hero-content h2 { font-size: clamp(34px, 5vw, 62px); line-height: 0.96; letter-spacing: -0.035em; }
+
+/* Section headings are inverted blocks, where Y2K uses a pink title bar. */
+:root[data-theme="neubrutalist"] .section-heading,
+:root[data-theme="neubrutalist"] .card-title {
+  display: inline-block; background: var(--nb-ink); color: #fff;
+  padding: 5px 11px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.02em;
+}
+:root[data-theme="neubrutalist"] .sidebar-heading,
+:root[data-theme="neubrutalist"] .layout-label { font-family: var(--font-heading); color: var(--nb-ink); }
+
+:root[data-theme="neubrutalist"] .nav {
+  background: var(--nb-yellow); border-bottom: 3px solid var(--nb-ink);
+}
+:root[data-theme="neubrutalist"] .nav-item { color: var(--nb-ink); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+:root[data-theme="neubrutalist"] .nav-item.active::after { height: 4px; background: var(--nb-ink); }
+:root[data-theme="neubrutalist"] .nav-brand { font-family: var(--font-heading); text-transform: uppercase; }
+:root[data-theme="neubrutalist"] .nav-brand-dot { width: 12px; height: 12px; background: var(--nb-red); box-shadow: 2px 2px 0 var(--nb-ink); }
+:root[data-theme="neubrutalist"] .nav .btn-icon { border: 3px solid var(--nb-ink); background: #fff; box-shadow: 3px 3px 0 var(--nb-ink); }
+:root[data-theme="neubrutalist"] .nav .btn-icon:hover { background: var(--nb-red); border-color: var(--nb-ink); }
+:root[data-theme="neubrutalist"] .notif-badge { background: var(--nb-red); color: var(--nb-ink); border: 2px solid var(--nb-ink); font-weight: 700; }
+
+:root[data-theme="neubrutalist"] .btn {
+  border: 3px solid var(--nb-ink); font-family: var(--font-heading); font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.04em; padding: 10px 16px;
+  box-shadow: 4px 4px 0 var(--nb-ink);
+  transition: transform 80ms, box-shadow 80ms, background 0.15s;
+}
+:root[data-theme="neubrutalist"] .btn-primary { background: var(--nb-yellow); color: var(--nb-ink); }
+:root[data-theme="neubrutalist"] .btn-primary:hover { background: var(--nb-blue); color: #fff; border-color: var(--nb-ink); }
+:root[data-theme="neubrutalist"] .btn-secondary { background: #fff; }
+:root[data-theme="neubrutalist"] .btn-secondary:hover { background: var(--nb-red); color: var(--nb-ink); border-color: var(--nb-ink); }
+:root[data-theme="neubrutalist"] .btn:not(:disabled):active { transform: translate(4px, 4px); box-shadow: 0 0 0 var(--nb-ink); }
+:root[data-theme="neubrutalist"] .btn-ghost { border-color: transparent; box-shadow: none; padding-inline: var(--space-1); }
+/* Same specificity trap as the other slab themes: the .btn rule above wins
+   over the plain .btn-icon box, so the square has to be restated. */
+:root[data-theme="neubrutalist"] .btn-icon { width: 34px; height: 34px; padding: 0; }
+
+:root[data-theme="neubrutalist"] .input,
+:root[data-theme="neubrutalist"] .seg,
+:root[data-theme="neubrutalist"] .search-trigger {
+  border: 3px solid var(--nb-ink); background: #fff; font-weight: 600;
+}
+:root[data-theme="neubrutalist"] .input:focus-visible,
+:root[data-theme="neubrutalist"] .search-trigger:hover { border-color: var(--nb-ink); box-shadow: 3px 3px 0 var(--nb-blue); }
+:root[data-theme="neubrutalist"] .search-trigger kbd { border: 2px solid var(--nb-ink); background: var(--nb-yellow); color: var(--nb-ink); }
+
+:root[data-theme="neubrutalist"] .card,
+:root[data-theme="neubrutalist"] .settings-section,
+:root[data-theme="neubrutalist"] .watch-settings,
+:root[data-theme="neubrutalist"] .watch-ep-card,
+:root[data-theme="neubrutalist"] .watch-rec-row,
+:root[data-theme="neubrutalist"] .watch-poster-card,
+:root[data-theme="neubrutalist"] .stream-dropdown,
+:root[data-theme="neubrutalist"] .dialog,
+:root[data-theme="neubrutalist"] .update-status:not(:empty),
+:root[data-theme="neubrutalist"] .poster-card .poster-image-wrap,
+:root[data-theme="neubrutalist"] .see-all-card,
+:root[data-theme="neubrutalist"] .media-details img {
+  border: 3px solid var(--nb-ink); background: #fff; box-shadow: 6px 6px 0 var(--nb-ink);
+}
+:root[data-theme="neubrutalist"] .settings-section { padding: var(--space-6); margin-bottom: var(--space-6); }
+:root[data-theme="neubrutalist"] .poster-card:hover .poster-image-wrap,
+:root[data-theme="neubrutalist"] .poster-card:focus-within .poster-image-wrap,
+:root[data-theme="neubrutalist"] .watch-ep-card:hover,
+:root[data-theme="neubrutalist"] .watch-rec-row:hover,
+:root[data-theme="neubrutalist"] .poster-card:hover .see-all-card {
+  border-color: var(--nb-ink); box-shadow: 8px 8px 0 var(--nb-blue);
+}
+
+:root[data-theme="neubrutalist"] .hero-backdrop { filter: saturate(1.15) contrast(1.08) brightness(0.62); }
+:root[data-theme="neubrutalist"] .hero { border: 4px solid var(--nb-ink); box-shadow: 8px 8px 0 var(--nb-ink); }
+:root[data-theme="neubrutalist"] .details-backdrop { border: 4px solid var(--nb-ink); }
+:root[data-theme="neubrutalist"] .hero-content .tag,
+:root[data-theme="neubrutalist"] .watch-kicker-row { font-family: var(--font-heading); color: var(--nb-ink); background: var(--nb-yellow); padding: 4px 9px; }
+:root[data-theme="neubrutalist"] .hero-content .tag::before,
+:root[data-theme="neubrutalist"] .watch-kicker-bar { display: none; }
+
+:root[data-theme="neubrutalist"] .poster-score,
+:root[data-theme="neubrutalist"] .watch-rating-chip { background: var(--nb-yellow); color: var(--nb-ink); border: 2px solid var(--nb-ink); font-weight: 700; }
+:root[data-theme="neubrutalist"] .poster-countdown,
+:root[data-theme="neubrutalist"] .watch-ep-badge { background: #fff; color: var(--nb-ink); border: 2px solid var(--nb-ink); font-weight: 700; }
+:root[data-theme="neubrutalist"] .tag-accent { background: var(--nb-blue); color: #fff; border: 2px solid var(--nb-ink); }
+:root[data-theme="neubrutalist"] .tag-outline { border: 2px solid var(--nb-ink); color: var(--nb-ink); }
+
+:root[data-theme="neubrutalist"] .episode-btn,
+:root[data-theme="neubrutalist"] .retry-btn,
+:root[data-theme="neubrutalist"] .watch-nav-btn,
+:root[data-theme="neubrutalist"] .slide-nav { border: 3px solid var(--nb-ink); background: #fff; box-shadow: 3px 3px 0 var(--nb-ink); }
+:root[data-theme="neubrutalist"] .episode-btn:hover,
+:root[data-theme="neubrutalist"] .retry-btn:hover,
+:root[data-theme="neubrutalist"] .watch-nav-btn:hover:not(:disabled),
+:root[data-theme="neubrutalist"] .slide-nav:hover { background: var(--nb-yellow); color: var(--nb-ink); }
+:root[data-theme="neubrutalist"] .episode-btn.active,
+:root[data-theme="neubrutalist"] .season-btn.active,
+:root[data-theme="neubrutalist"] .watch-season-pill.active,
+:root[data-theme="neubrutalist"] .seg-opt:has(input:checked) {
+  background: var(--nb-blue); color: #fff; box-shadow: inset 0 0 0 3px var(--nb-ink);
+}
+
+:root[data-theme="neubrutalist"] .download-progress-bar,
+:root[data-theme="neubrutalist"] .continue-progress { border: 2px solid var(--nb-ink); background: #fff; height: 12px; }
+:root[data-theme="neubrutalist"] .download-progress-fill,
+:root[data-theme="neubrutalist"] .continue-progress-fill,
+:root[data-theme="neubrutalist"] .watch-ep-progress-fill { background: var(--nb-blue); }
+
+:root[data-theme="neubrutalist"] .watch-player { background: #fff; border: 4px solid var(--nb-ink); box-shadow: 8px 8px 0 var(--nb-ink); }
+:root[data-theme="neubrutalist"] .watch-player-glow { background: none; }
+:root[data-theme="neubrutalist"] .watch-player-bar { background: linear-gradient(0deg, rgba(255, 255, 255, 0.96) 30%, transparent 100%); }
+:root[data-theme="neubrutalist"] .player-play-circle { border: 4px solid var(--nb-ink); background: var(--nb-yellow); color: var(--nb-ink); box-shadow: 5px 5px 0 var(--nb-ink); }
+:root[data-theme="neubrutalist"] .player-play-circle:hover:not(:disabled) { background: var(--nb-red); transform: none; }
+:root[data-theme="neubrutalist"] .watch-status-dot { background: var(--nb-red); box-shadow: none; }
+
+:root[data-theme="neubrutalist"] .dialog-backdrop { background: rgba(0, 0, 0, 0.5); }
+:root[data-theme="neubrutalist"] .dialog input { border-bottom: 3px solid var(--nb-ink); font-weight: 600;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 256 256' fill='%230f4fc7'%3E%3Cpath d='M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z'%3E%3C/path%3E%3C/svg%3E");
+}
+:root[data-theme="neubrutalist"] .dialog-item:hover,
+:root[data-theme="neubrutalist"] .notif-item:hover { background: var(--nb-yellow); }
+:root[data-theme="neubrutalist"] .trending-item { border-bottom: 3px solid var(--nb-ink); }
+:root[data-theme="neubrutalist"] .trending-item img { border: 2px solid var(--nb-ink); }
+:root[data-theme="neubrutalist"] .trending-rank { font-family: var(--font-heading); color: var(--nb-ink); }
+
+:root[data-theme="neubrutalist"] ::-webkit-scrollbar { width: 16px; height: 16px; }
+:root[data-theme="neubrutalist"] ::-webkit-scrollbar-track { background: #fff; border-left: 3px solid var(--nb-ink); }
+:root[data-theme="neubrutalist"] ::-webkit-scrollbar-thumb,
+:root[data-theme="neubrutalist"] .content::-webkit-scrollbar-thumb { background: var(--nb-yellow); border: 3px solid var(--nb-ink); }
+:root[data-theme="neubrutalist"] .footer { font-family: var(--font-heading); text-transform: uppercase; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme="neubrutalist"] .btn:not(:disabled):active { transform: none; }
+}
+
+:root[data-theme="neubrutalist"] .theme-option { border: 3px solid var(--nb-ink); box-shadow: 4px 4px 0 var(--nb-ink); }
+:root[data-theme="neubrutalist"] .theme-option[aria-pressed="true"] { box-shadow: 4px 4px 0 var(--nb-blue); }
+:root[data-theme="neubrutalist"] .theme-option-name { font-family: var(--font-heading); text-transform: uppercase; font-size: 12px; }
+:root[data-theme="neubrutalist"] .theme-option-meta { border-top: 3px solid var(--nb-ink); }
+
+/* ---------------------------------------------------------------------
+   Appearance picker (About page) — theme-agnostic. Each swatch paints
+   itself from the inline --sw-* custom properties js/main.js gives it, so
+   it previews a theme without that theme being active.
+   --------------------------------------------------------------------- */
+
+.theme-picker { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.theme-option {
+  display: block; flex: 0 0 168px; padding: 0; overflow: hidden; cursor: pointer; text-align: left;
+  font-family: inherit; color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider); border-radius: var(--radius-md);
+  transition: border-color 0.15s, transform 0.18s, box-shadow 0.18s;
+}
+.theme-option:hover { border-color: var(--color-accent); transform: translateY(-2px); }
+.theme-option[aria-pressed="true"] { border-color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.theme-swatch {
+  height: 76px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between;
+  background-color: var(--sw-bg); background-image: var(--sw-bg-image, none); background-size: 16px 16px;
+}
+.theme-swatch-bar { height: 14px; background: var(--sw-surface); border: 1px solid var(--sw-line); }
+.theme-swatch-chips { display: flex; gap: 5px; }
+.theme-swatch-chips i { width: 18px; height: 12px; border: 1px solid var(--sw-line); background: var(--sw-chip); }
+.theme-swatch-chips i:nth-child(2) { background: var(--sw-chip-2); }
+.theme-option-meta { display: block; padding: 9px 11px 11px; border-top: 1px solid var(--color-divider); }
+.theme-option-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.theme-option-desc { display: block; font-size: 11.5px; color: var(--color-subtle); margin-top: 2px; }
+.theme-option-check { margin-left: auto; color: var(--color-accent); flex: none; opacity: 0; }
+.theme-option[aria-pressed="true"] .theme-option-check { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-option { transition: border-color 0.15s; }
+  .theme-option:hover { transform: none; }
+}
+
+:root[data-theme="y2k"] .theme-option { border: 2px solid var(--y2k-ink); box-shadow: 3px 3px 0 var(--y2k-ink); }
+:root[data-theme="y2k"] .theme-option[aria-pressed="true"] { box-shadow: 3px 3px 0 var(--color-accent); }
+:root[data-theme="y2k"] .theme-option-name { font-family: var(--font-heading); font-size: 9px; line-height: 1.7; }
+:root[data-theme="y2k"] .theme-option-meta { border-top: 2px solid var(--y2k-ink); }

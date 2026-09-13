@@ -2311,7 +2311,7 @@ function initDownloadsSettings() {
 // key (a personal API key, costs nothing to re-paste, and shouldn't end up
 // sitting in a JSON file someone might share) or notifications (tied to
 // what's airing *now*, meaningless to restore later).
-const BACKUP_KEYS = ['trela_wishlist', 'trela_continue_watching', 'trela_watched', 'theme'];
+const BACKUP_KEYS = ['trela_wishlist', 'trela_continue_watching', 'trela_watched', 'theme', 'trela_theme'];
 
 function exportBackup() {
   const data = { version: 1, exportedAt: new Date().toISOString() };
@@ -2361,6 +2361,73 @@ const SUN_ICON_SVG =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
 const MOON_ICON_SVG =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+const CHECK_ICON_SVG =
+  '<svg class="theme-option-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+// ---------- Theme families ----------
+// A family is a whole design system, not a palette: styles.css gives each one
+// its own type, shape and shadow language. Nocturne is the original (the
+// :root / :root.light blocks) and is the only family with a light/dark pair,
+// so the nav's sun/moon toggle retires while a light-only family is active.
+// `swatch` is the inline style the About-page picker paints its preview tile
+// with — it has to be data rather than CSS because a tile previews a theme that
+// isn't on. --sw-bg-image is optional; the stylesheet defaults it to none.
+const THEME_FAMILIES = {
+  nocturne: {
+    label: 'Nocturne',
+    desc: 'The default. Deep blue-violet, soft shadows.',
+    lightDark: true,
+    swatch: '--sw-bg:#161826;--sw-surface:#232532;--sw-line:rgba(233,233,237,0.22);--sw-chip:#9184d9;--sw-chip-2:#a7a1db',
+  },
+  y2k: {
+    label: 'Y2K Midnight',
+    desc: 'Early-2000s desktop after dark. Pixel type, hard shadows.',
+    lightDark: false,
+    swatch: '--sw-bg:#16122b;--sw-surface:#241c3f;--sw-line:#efe6ff;--sw-chip:#b3357f;--sw-chip-2:#ffd84d;'
+      + '--sw-bg-image:linear-gradient(rgba(150,120,255,0.4) 1px, transparent 1px),'
+      + 'linear-gradient(90deg, rgba(150,120,255,0.4) 1px, transparent 1px)',
+  },
+  terminal: {
+    label: 'Terminal',
+    desc: 'Phosphor console. Monospace, scanlines, glow.',
+    lightDark: false,
+    swatch: '--sw-bg:#0a0e0a;--sw-surface:#0f150f;--sw-line:rgba(57,255,20,0.45);--sw-chip:#39ff14;--sw-chip-2:#7fa87c;'
+      + '--sw-bg-image:repeating-linear-gradient(rgba(57,255,20,0.22) 0 1px, transparent 1px 4px)',
+  },
+  vintage: {
+    label: 'Vintage',
+    desc: 'Faded film stock. Serif display, grain, polaroid frames.',
+    lightDark: false,
+    swatch: '--sw-bg:#f5e6c8;--sw-surface:#fffaf0;--sw-line:rgba(58,46,33,0.3);--sw-chip:#4a7b7c;--sw-chip-2:#e8b4b8;'
+      + '--sw-bg-image:radial-gradient(60% 60% at 100% 0%, rgba(232,180,184,0.55), transparent 70%)',
+  },
+  neubrutalist: {
+    label: 'Neubrutalist',
+    desc: 'Black rules, primary blocks, oversized grotesque.',
+    lightDark: false,
+    swatch: '--sw-bg:#f6f4ec;--sw-surface:#ffffff;--sw-line:#000000;--sw-chip:#ffeb3b;--sw-chip-2:#ff5252',
+  },
+};
+const DEFAULT_THEME_FAMILY = 'nocturne';
+
+function currentThemeFamily() {
+  return document.documentElement.dataset.theme || DEFAULT_THEME_FAMILY;
+}
+
+function applyThemeFamily(name) {
+  const family = THEME_FAMILIES[name] ? name : DEFAULT_THEME_FAMILY;
+  const root = document.documentElement;
+  // Nocturne is the unstyled base, so it's the absence of the attribute rather
+  // than a value of it — that keeps its selectors at their original specificity.
+  if (family === DEFAULT_THEME_FAMILY) delete root.dataset.theme;
+  else root.dataset.theme = family;
+  // The light/dark class stays on <html> either way: it's what Nocturne reads
+  // when you switch back, and a light-only family simply ignores it.
+  // .hidden (not the hidden attribute) because .btn sets display: inline-flex,
+  // which outranks the attribute's UA display: none.
+  document.getElementById('theme-toggle')
+    .classList.toggle('hidden', !THEME_FAMILIES[family].lightDark);
+}
 
 function applyTheme(theme) {
   const root = document.documentElement;
@@ -2369,9 +2436,41 @@ function applyTheme(theme) {
   document.getElementById('theme-toggle').innerHTML = theme === 'dark' ? SUN_ICON_SVG : MOON_ICON_SVG;
 }
 
+function renderThemePicker() {
+  const active = currentThemeFamily();
+  document.getElementById('theme-picker').innerHTML = Object.entries(THEME_FAMILIES)
+    .map(([id, family]) => {
+      return `<button type="button" class="theme-option" data-theme-id="${id}" aria-pressed="${id === active}">
+          <span class="theme-swatch" style="${family.swatch}">
+            <span class="theme-swatch-bar"></span>
+            <span class="theme-swatch-chips"><i></i><i></i></span>
+          </span>
+          <span class="theme-option-meta">
+            <span class="theme-option-name">${family.label}${CHECK_ICON_SVG}</span>
+            <span class="theme-option-desc">${family.desc}</span>
+          </span>
+        </button>`;
+    })
+    .join('');
+}
+
+function initThemePicker() {
+  const picker = document.getElementById('theme-picker');
+  renderThemePicker();
+  picker.addEventListener('click', (e) => {
+    const btn = e.target.closest('.theme-option');
+    if (!btn || btn.dataset.themeId === currentThemeFamily()) return;
+    applyThemeFamily(btn.dataset.themeId);
+    localStorage.setItem('trela_theme', btn.dataset.themeId);
+    renderThemePicker();
+  });
+}
+
 function initThemeToggle() {
   const root = document.documentElement;
   const toggle = document.getElementById('theme-toggle');
+  // Family first: it decides whether the light/dark toggle is even shown.
+  applyThemeFamily(localStorage.getItem('trela_theme'));
   const saved = localStorage.getItem('theme');
   const initial = saved === 'dark' || saved === 'light'
     ? saved
@@ -2419,6 +2518,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initMovieboxTuiUpdate();
   initTmdbKey();
   initThemeToggle();
+  initThemePicker();
   initCommandPalette();
   initBrowseLayoutToggle();
   initAnimeGenreFilter();
