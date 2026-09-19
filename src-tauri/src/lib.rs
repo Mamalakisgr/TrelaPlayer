@@ -24,6 +24,7 @@ pub fn run() {
             anilist::get_random_anime,
             anilist::get_anime_genres,
             anilist::get_anime_recommendations,
+            anilist::get_anime_episode_stills,
             player::watch_episode,
             player::update_ani_cli,
             player::get_ani_cli_version,

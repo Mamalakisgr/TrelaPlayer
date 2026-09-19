@@ -24,6 +24,9 @@ export const api = {
   getRandomAnime: (genre) => invoke('get_random_anime', { genre: genre || undefined }),
   getAnimeGenres: () => invoke('get_anime_genres', {}),
   getAnimeRecommendations: (id) => invoke('get_anime_recommendations', { id }),
+  // [] whenever AniList's franchise-level episode list can't be trusted
+  // for this exact entry (see stills_if_complete in anilist.rs).
+  getAnimeEpisodeStills: (id) => invoke('get_anime_episode_stills', { id }),
   // Verifies (at watch time only) which of ani-cli's own search results for
   // `title` is actually the right one, using AniList's known episode count
   // to disambiguate, and returns that entry's real episode numbering —

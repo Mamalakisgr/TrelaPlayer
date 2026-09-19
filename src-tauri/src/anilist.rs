@@ -326,6 +326,75 @@ pub async fn get_anime_genres() -> Result<Vec<String>, String> {
         .collect())
 }
 
+// ---------- Per-episode stills for the Watching strip ----------
+//
+// AniList has no episode-number field: numbers only exist inside
+// streamingEpisodes' free-text titles, in Crunchyroll's "Episode 1 - Cruelty"
+// shape. Worse, streamingEpisodes is franchise-level rather than entry-level,
+// so a sequel's list is frequently the *prequel's* episodes — real images from
+// the wrong season, which is worse than no image at all. Hence the trust rule
+// in stills_if_complete: all-or-nothing per title.
+
+fn parse_episode_number(title: &str) -> Option<u64> {
+    let bytes = title.as_bytes();
+    let start = bytes.iter().position(u8::is_ascii_digit)?;
+    let end = start + bytes[start..].iter().take_while(|b| b.is_ascii_digit()).count();
+    // "Episode 6.5 - Recap" is a recap sharing its integer part with a real
+    // episode, so truncating to 6 would put the recap's image on episode 6.
+    if bytes.get(end) == Some(&b'.') && matches!(bytes.get(end + 1), Some(c) if c.is_ascii_digit()) {
+        return None;
+    }
+    title[start..end].parse().ok()
+}
+
+// Returns thumbnails, ordered by episode number, only when the parsed numbers
+// are exactly the set {1..=episodes} with one thumbnailed entry each —
+// otherwise the list belongs to some other entry in the franchise (or is
+// partial), and every card would get a confidently wrong image. Length +
+// range + no duplicates is that set check.
+fn stills_if_complete(episodes: Option<u64>, streaming: &serde_json::Value) -> Vec<String> {
+    let total = episodes.unwrap_or(0);
+    let entries = streaming.as_array().map(Vec::as_slice).unwrap_or_default();
+    if total == 0 || entries.len() as u64 != total {
+        return vec![];
+    }
+    let mut numbered = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let number = entry["title"].as_str().and_then(parse_episode_number);
+        let thumbnail = entry["thumbnail"].as_str().unwrap_or("");
+        match number {
+            Some(n) if (1..=total).contains(&n) && !thumbnail.is_empty() => numbered.push((n, thumbnail.to_string())),
+            _ => return vec![],
+        }
+    }
+    numbered.sort_by_key(|(n, _)| *n);
+    if numbered.windows(2).any(|w| w[0].0 == w[1].0) {
+        return vec![];
+    }
+    numbered.into_iter().map(|(_, url)| url).collect()
+}
+
+// Empty vec is the one "no art" answer, whatever the cause (network error,
+// malformed response, untrustworthy list) — the strip's cover-art fallback
+// covers all of them identically, and a hard error would only cost the caller
+// a try/catch to arrive at the same render.
+#[tauri::command]
+pub async fn get_anime_episode_stills(id: u64) -> Result<Vec<String>, String> {
+    let query = "
+        query ($id: Int) {
+            Media(id: $id, type: ANIME) {
+                episodes
+                streamingEpisodes { title thumbnail }
+            }
+        }
+    ";
+    let Ok(data) = anilist_query(query, json!({ "id": id })).await else {
+        return Ok(vec![]);
+    };
+    let media = &data["data"]["Media"];
+    Ok(stills_if_complete(media["episodes"].as_u64(), &media["streamingEpisodes"]))
+}
+
 const SEASONS: [&str; 4] = ["WINTER", "SPRING", "SUMMER", "FALL"];
 
 // Days-since-epoch -> (year, month) via Howard Hinnant's civil_from_days
@@ -424,5 +493,144 @@ mod next_airing_tests {
         assert_eq!(epoch_from_civil(1970, 1, 1), 0);
         assert_eq!(epoch_from_civil(2000, 3, 1), 951868800);
         assert_eq!(epoch_from_civil(2026, 10, 20), 1792454400);
+    }
+}
+
+#[cfg(test)]
+mod episode_stills_tests {
+    use super::*;
+    use serde_json::json;
+
+    // AniList entries carry only a free-text title and a thumbnail URL.
+    fn ep(title: &str) -> serde_json::Value {
+        json!({ "title": title, "thumbnail": format!("http://img/{title}") })
+    }
+
+    // A full, well-formed list: "Episode 1 - Ep 1" .. "Episode n - Ep n".
+    fn eps(range: std::ops::RangeInclusive<u64>) -> serde_json::Value {
+        serde_json::Value::Array(range.map(|n| ep(&format!("Episode {n} - Ep {n}"))).collect())
+    }
+
+    // ---- parse_episode_number ----
+
+    #[test]
+    fn parses_crunchyroll_style_titles() {
+        assert_eq!(parse_episode_number("Episode 1 - Cruelty"), Some(1));
+        assert_eq!(parse_episode_number("Episode 24 - Finale"), Some(24));
+        assert_eq!(parse_episode_number("Episode 01 - Cold Open"), Some(1));
+    }
+
+    // Episode 0 must parse, not vanish: a {0..24} list has to be *rejected* by
+    // the set rule, not silently trimmed into an accepted {1..24}.
+    #[test]
+    fn parses_episode_zero() {
+        assert_eq!(parse_episode_number("Episode 0 - Prologue"), Some(0));
+    }
+
+    // "Episode 6.5" is a recap. Truncating to 6 would collide with the real
+    // episode 6 and put the recap's image on it.
+    #[test]
+    fn rejects_fractional_episode_numbers() {
+        assert_eq!(parse_episode_number("Episode 6.5 - Recap"), None);
+    }
+
+    #[test]
+    fn rejects_titles_without_a_number() {
+        assert_eq!(parse_episode_number("OVA - Beach Special"), None);
+        assert_eq!(parse_episode_number("Special"), None);
+        assert_eq!(parse_episode_number(""), None);
+    }
+
+    #[test]
+    fn first_number_in_the_title_wins() {
+        assert_eq!(parse_episode_number("Episode 1 - Episode 2 of the Plan"), Some(1));
+    }
+
+    // ---- stills_if_complete: accepted ----
+
+    #[test]
+    fn accepts_a_list_covering_every_episode() {
+        assert_eq!(stills_if_complete(Some(24), &eps(1..=24)).len(), 24);
+        assert_eq!(stills_if_complete(Some(12), &eps(1..=12)).len(), 12);
+    }
+
+    // AniList's order is not the episode order (One Piece returns descending),
+    // so the caller's stills[i] would otherwise be a real-but-wrong image.
+    #[test]
+    fn returns_stills_sorted_by_episode_number() {
+        let list = json!([ep("Episode 3 - C"), ep("Episode 1 - A"), ep("Episode 2 - B")]);
+        assert_eq!(
+            stills_if_complete(Some(3), &list),
+            vec!["http://img/Episode 1 - A", "http://img/Episode 2 - B", "http://img/Episode 3 - C"]
+        );
+    }
+
+    // ---- stills_if_complete: rejected (franchise-level lists) ----
+
+    // streamingEpisodes is franchise-wide, so a sequel's list is often the
+    // prequel's episodes — real images from the wrong season.
+    #[test]
+    fn rejects_superset_of_this_entrys_episodes() {
+        assert!(stills_if_complete(Some(23), &eps(1..=24)).is_empty()); // Jujutsu Kaisen S2
+        assert!(stills_if_complete(Some(11), &eps(1..=26)).is_empty()); // Kimetsu Yuukaku-hen
+        assert!(stills_if_complete(Some(16), &eps(1..=25)).is_empty()); // AoT Final
+    }
+
+    #[test]
+    fn rejects_subset_of_this_entrys_episodes() {
+        assert!(stills_if_complete(Some(500), &eps(1..=32)).is_empty()); // Naruto Shippuuden
+    }
+
+    // Tensura S2: exactly 24 entries, numbered 49-72. A count-only check passes
+    // this and mislabels every card.
+    #[test]
+    fn rejects_right_count_with_wrong_numbers() {
+        assert!(stills_if_complete(Some(24), &eps(49..=72)).is_empty());
+    }
+
+    #[test]
+    fn rejects_zero_indexed_list() {
+        assert!(stills_if_complete(Some(11), &eps(0..=24)).is_empty()); // Mushoku Tensei
+    }
+
+    #[test]
+    fn rejects_duplicate_numbers_even_when_the_count_matches() {
+        let list = json!([ep("Episode 1 - A"), ep("Episode 1 - B")]);
+        assert!(stills_if_complete(Some(2), &list).is_empty());
+    }
+
+    // Length alone matches here (12 entries, 12 episodes) — only the entry that
+    // carries no episode number rejects the list.
+    #[test]
+    fn rejects_list_with_an_unparseable_entry() {
+        let mut list = eps(1..=11);
+        list.as_array_mut().unwrap().push(ep("Special - Recap"));
+        assert!(stills_if_complete(Some(12), &list).is_empty());
+    }
+
+    // All-or-nothing: one missing image is not a gap to fill, it's a list we
+    // stop trusting — the fallback is per-title, not per-card.
+    #[test]
+    fn rejects_perfect_set_with_a_missing_thumbnail() {
+        for missing in [serde_json::Value::Null, json!("")] {
+            let mut list = eps(1..=3);
+            list[1]["thumbnail"] = missing;
+            assert!(stills_if_complete(Some(3), &list).is_empty());
+        }
+    }
+
+    // Media.episodes is null while a show is still releasing (One Piece).
+    #[test]
+    fn rejects_unknown_or_zero_episode_count() {
+        assert!(stills_if_complete(None, &eps(1..=1000)).is_empty());
+        assert!(stills_if_complete(Some(0), &eps(1..=1000)).is_empty());
+    }
+
+    #[test]
+    fn rejects_malformed_streaming_episodes() {
+        assert!(stills_if_complete(Some(12), &serde_json::Value::Null).is_empty());
+        assert!(stills_if_complete(Some(12), &json!([])).is_empty());
+        assert!(stills_if_complete(Some(12), &json!({})["streamingEpisodes"]).is_empty());
+        assert!(stills_if_complete(Some(1), &json!([{ "thumbnail": "http://img/1" }])).is_empty());
     }
 }

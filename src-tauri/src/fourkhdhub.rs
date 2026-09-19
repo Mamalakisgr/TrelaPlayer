@@ -1,7 +1,7 @@
 use crate::models::StreamOption;
 use crate::movplayer::extract_stream_options;
 use moviebox_tui::providers::fourkhdhub::FourKHdHubClient;
-use moviebox_tui::providers::models::{CatalogItem, MediaType, Release};
+use moviebox_tui::providers::models::{CatalogItem, MediaType, Release, ResolutionIntent};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tauri::AppHandle;
@@ -258,7 +258,14 @@ pub async fn play_fourk_stream(
     let mut last_err = String::new();
     let mut resolved = None;
     for release in &releases {
-        match client.resolve_release(release).await {
+        // Playback, not Download: moviebox-tui 0.1.21 made the mirror scorer
+        // intent-aware, and the two intents genuinely disagree. Playback
+        // promotes streamable hosts (pixel.hubcloud., googleusercontent.com,
+        // googlevideo.com) to the top rank, where the old intent-less scorer
+        // ranked them 2nd and 3rd behind download-oriented mirrors. This is
+        // the play command, so anything that streams beats anything that
+        // merely downloads intact.
+        match client.resolve_release(release, ResolutionIntent::Playback).await {
             Ok(source) => {
                 resolved = Some(source);
                 break;

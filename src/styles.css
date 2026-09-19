@@ -633,6 +633,12 @@ img { display: block; max-width: 100%; }
 .watch-ep-thumb {
   position: relative; aspect-ratio: 16 / 9; background: var(--poster-gradient); background-size: cover; background-position: center;
 }
+/* Anime fallback: the show's own cover art, not a per-episode still. Anime key
+   art puts the face in the upper third, so a portrait cover centred in a 16:9
+   box shows a torso — bias the crop upward, and flatten it under an overlay so
+   it reads as a deliberate placeholder rather than a wrong image. */
+.watch-ep-thumb.is-fallback { background-position: center 18%; }
+.watch-ep-thumb.is-fallback::before { content: ''; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }
 .watch-ep-badge {
   position: absolute; font-size: 11px; padding: 2px 7px; border-radius: 5px;
   background: color-mix(in srgb, var(--color-bg) 85%, transparent); color: var(--color-text);

@@ -146,7 +146,7 @@ async fn fetch_episode_resources(
         let mut items = Vec::new();
         for page in 1..=10 {
             let (page_items, pager) = client
-                .fetch_resource_page(subject_id, 0, page)
+                .fetch_resource_page(subject_id, 0, 0, 0, page)
                 .await
                 .map_err(|e| format!("Failed to fetch sources: {:?}", e))?;
             let has_more = pager["hasMore"].as_bool().unwrap_or(false);
@@ -176,7 +176,17 @@ async fn fetch_episode_resources(
                 // there's genuinely nothing more).
                 let mut found_any = false;
                 for page in 1..=60 {
-                    let Ok((page_items, pager)) = client.fetch_resource_page(&subject_id, resolution, page).await else { break };
+                    // season/episode are deliberately 0 even though the real
+                    // ones are in scope. moviebox-tui 0.1.20 added them as
+                    // opt-in server-side filters: resource_page_path only
+                    // appends &se=&ep= when they're non-zero, so 0, 0 keeps
+                    // the request URL byte-identical to 0.1.14's. Passing the
+                    // real values is not a future improvement to reach for:
+                    // per the comment above this function, the endpoint does
+                    // not reliably honor se/ep — it returns the same
+                    // season-1-heavy page regardless — which is the whole
+                    // reason this pages unfiltered and matches client-side.
+                    let Ok((page_items, pager)) = client.fetch_resource_page(&subject_id, 0, 0, resolution, page).await else { break };
                     let has_more = pager["hasMore"].as_bool().unwrap_or(false);
                     let found_this_page = page_items
                         .iter()
@@ -631,4 +641,37 @@ pub async fn clear_downloads() -> Result<String, String> {
         .await
         .map_err(|e| format!("Failed to clear downloads: {}", e))?;
     Ok(format!("Cleared {} file(s), {}.", file_count, format_size(&total_bytes.to_string())))
+}
+
+#[cfg(test)]
+mod resource_page_path_tests {
+    use moviebox_tui::providers::moviebox::resource_page_path;
+
+    // Both fetch_resource_page call sites in this file pass 0, 0 for the
+    // season/episode parameters moviebox-tui 0.1.20 added, so the request URL
+    // stays exactly what 0.1.14 sent. That rests entirely on the crate
+    // treating those parameters as opt-in. If a later 0.1.x makes them
+    // unconditional, Trela's source selection changes at the network layer
+    // while `cargo check` still passes — the same class of silent 0.x
+    // breakage that made this upgrade necessary. These fail instead.
+    #[test]
+    fn zero_season_and_episode_omit_the_se_ep_filters() {
+        assert_eq!(
+            resource_page_path("abc123", 0, 0, 0, 1),
+            "/wefeed-mobile-bff/subject-api/resource?subjectId=abc123&page=1&perPage=20"
+        );
+        assert_eq!(
+            resource_page_path("abc123", 0, 0, 1080, 3),
+            "/wefeed-mobile-bff/subject-api/resource?subjectId=abc123&page=3&perPage=20&resolution=1080"
+        );
+    }
+
+    // Pins what we deliberately are NOT doing yet: passing the real season and
+    // episode moves filtering server-side, which is a source-selection change
+    // and its own ticket.
+    #[test]
+    fn non_zero_season_or_episode_adds_server_side_filtering() {
+        let path = resource_page_path("abc123", 2, 5, 1080, 1);
+        assert!(path.contains("&se=2&ep=5"), "unexpected path: {path}");
+    }
 }

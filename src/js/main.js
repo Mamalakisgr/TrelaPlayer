@@ -1682,10 +1682,15 @@ function enterWatching(play, { showQuality = false, backTarget, crumbTitle, kick
 // same reasoning applies here for a resumed anime's Next/Prev Episode clicks.
 // ---------- Watching: episode strip + sidebar (poster card, recommendations) ----------
 
+// url('...') inside a double-quoted attribute: escapeAttr covers & " < >, but
+// not the apostrophe that would close the CSS string early.
+const cssUrl = (url) => `url('${escapeAttr(String(url).replace(/'/g, '%27'))}')`;
+
 // Renders a horizontal, scroll-snapped strip of episode cards from a list of
-// { episode_number, still_url?, runtime? } — shared by anime (bare numbers,
-// no per-episode art available from AniList) and series (real TMDB stills/
-// runtime). `current` marks the one whose page is open right now; there's no
+// { episode_number, still_url?, is_fallback?, runtime? } — shared by anime
+// (AniList per-episode art when it's trustworthy, else the show's cover under
+// a dark overlay: is_fallback) and series (real TMDB stills/runtime, never a
+// fallback). `current` marks the one whose page is open right now; there's no
 // per-episode watched history stored anywhere in the app, so every other
 // card is left unlabeled rather than guessing at past viewing.
 function renderEpisodeTrack(episodes, current, { ariaLabel, sub, onSelect }) {
@@ -1693,10 +1698,10 @@ function renderEpisodeTrack(episodes, current, { ariaLabel, sub, onSelect }) {
   track.innerHTML = episodes
     .map((ep) => {
       const isCurrent = ep.episode_number === current;
-      const style = ep.still_url ? ` style="background-image:url('${ep.still_url}')"` : '';
+      const style = ep.still_url ? ` style="background-image:${cssUrl(ep.still_url)}"` : '';
       return `
         <div class="watch-ep-card${isCurrent ? ' is-current' : ''}" data-episode="${ep.episode_number}" role="button" tabindex="0" aria-current="${isCurrent ? 'true' : 'false'}" aria-label="${escapeAttr(ariaLabel(ep, isCurrent))}">
-          <div class="watch-ep-thumb"${style}>
+          <div class="watch-ep-thumb${ep.is_fallback ? ' is-fallback' : ''}"${style}>
             <span class="watch-ep-badge watch-ep-num">${ep.episode_number}</span>
             ${isCurrent ? '<span class="watch-ep-badge watch-ep-state">Playing</span>' : ''}
             <div class="watch-ep-progress-track"><div class="watch-ep-progress-fill" style="width:${isCurrent ? 100 : 0}%"></div></div>
@@ -1717,10 +1722,29 @@ function renderEpisodeTrack(episodes, current, { ariaLabel, sub, onSelect }) {
   if (currentCard) track.scrollLeft = Math.max(0, currentCard.offsetLeft - (track.clientWidth - currentCard.clientWidth) / 2);
 }
 
-// Anime has no per-episode stills/runtime from AniList — the strip only
-// needs to know the total count to render 1..N, and is hidden without one
-// (shallow Continue Watching/Recent Episodes entries never carry it).
-function renderAnimeEpisodeStrip(anime, episodeNum, goTo) {
+const animeStillsCache = new Map(); // anilist id -> string[] ([] = nothing trustworthy)
+async function getCachedAnimeStills(id) {
+  if (!animeStillsCache.has(id)) {
+    try {
+      animeStillsCache.set(id, await api.getAnimeEpisodeStills(id));
+    } catch (e) {
+      // Never fatal: without stills the strip just renders cover-art cards.
+      // Uncached, so a transient failure doesn't degrade the title all session.
+      return [];
+    }
+  }
+  return animeStillsCache.get(id);
+}
+
+let animeStillsRequestId = 0;
+
+// AniList only has per-episode art when its franchise-level episode list
+// matches this entry exactly (see stills_if_complete in anilist.rs); every
+// other case falls back to the show's own cover under a dark overlay, so the
+// track is built once, after the lookup, rather than flashing bare cards
+// first. Hidden entirely without an episode count (shallow Continue
+// Watching/Recent Episodes entries never carry one).
+async function renderAnimeEpisodeStrip(anime, episodeNum, goTo) {
   const section = document.getElementById('watch-episodes');
   const total = anime.episodes;
   if (!total) {
@@ -1732,7 +1756,24 @@ function renderAnimeEpisodeStrip(anime, episodeNum, goTo) {
   const countEl = document.getElementById('watch-episodes-count');
   countEl.textContent = `${total} episode${total === 1 ? '' : 's'}`;
   countEl.classList.remove('hidden');
-  const episodes = Array.from({ length: total }, (_, i) => ({ episode_number: String(i + 1) }));
+  // Synchronously, before the await: nothing else clears the track, so the
+  // previous title's cards would otherwise sit there — "Playing" badge on the
+  // wrong episode — for the whole round trip.
+  document.getElementById('watch-episode-track').innerHTML = '';
+  // Callers don't await this render (see selectEpisode), so two episode
+  // clicks race; last one wins, same as streamOptionsRequestId above.
+  const requestId = ++animeStillsRequestId;
+  const fetched = anime.id ? await getCachedAnimeStills(anime.id) : [];
+  if (requestId !== animeStillsRequestId) return;
+  // The backend counted episodes from its own read of AniList; if that count
+  // disagrees with this one, a per-card `stills[i] ||` would mix real stills
+  // and fallbacks — the exact state the all-or-nothing rule exists to avoid.
+  const stills = fetched.length === total ? fetched : [];
+  const episodes = Array.from({ length: total }, (_, i) => ({
+    episode_number: String(i + 1),
+    still_url: stills[i] || anime.image_url,
+    is_fallback: !stills[i],
+  }));
   renderEpisodeTrack(episodes, String(episodeNum), {
     ariaLabel: (ep, isCurrent) => `Episode ${ep.episode_number}${isCurrent ? ' — Now playing' : ''}`,
     sub: (ep, isCurrent) => (isCurrent ? 'Now playing' : ''),

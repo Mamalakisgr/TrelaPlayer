@@ -199,27 +199,54 @@ pub fn update_moviebox_tui() -> Result<String, String> {
     if !update_output.status.success() {
         return Err(if update_text.is_empty() { format!("cargo update exited with status {}", update_output.status) } else { update_text });
     }
-    if update_text.trim().is_empty() {
-        return Ok("moviebox-tui is already at the latest version Cargo.toml allows.".to_string());
-    }
-
+    // Whether anything actually changed has to be read off the version line,
+    // not off stderr being empty. A no-op `cargo update` still writes
+    // "Updating crates.io index" and "Locking 0 packages to latest compatible
+    // versions", so an emptiness test never fires — every no-op fell through
+    // to the compile check below, and any unrelated failure there was then
+    // reported as "the new version doesn't compile", about a version that was
+    // never installed and with no previous version to roll back to.
     let versions = update_text.lines().find_map(|line| {
         let rest = line.trim().strip_prefix("Updating moviebox-tui ")?;
         let (old, new) = rest.split_once(" -> ")?;
         Some((old.trim_start_matches('v').to_string(), new.trim_start_matches('v').to_string()))
     });
+    let Some((old_version, new_version)) = versions else {
+        return Ok("moviebox-tui is already at the latest version Cargo.toml allows.".to_string());
+    };
 
-    let check_ok = Command::new(cargo_exe)
+    // Keep cargo's output rather than reducing it to a success bit: "doesn't
+    // compile" with nothing else left the user no way to see what broke, and
+    // made a cargo that failed to launch indistinguishable from code that
+    // genuinely doesn't build.
+    let check = Command::new(cargo_exe)
         .args(["check", "--package", "trela"])
         .current_dir(manifest_dir)
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if check_ok {
+        .output();
+    if matches!(&check, Ok(o) if o.status.success()) {
         return Ok(format!("{}\n\nRebuild and restart Trela for this to take effect.", update_text.trim()));
     }
-
-    let Some((old_version, new_version)) = versions else {
-        return Err(format!("{}\n\nUpdated, but the new version doesn't compile against Trela's code — couldn't determine the previous version to roll back to automatically.", update_text.trim()));
+    let check_detail = match &check {
+        Ok(o) => {
+            let text = strip_ansi(&String::from_utf8_lossy(&o.stderr));
+            // Keep the "-->" location lines alongside the "error" headlines:
+            // "this method takes 2 arguments but 1 was supplied" is close to
+            // useless without the file and line it happened in, which is what
+            // the first report of this actually looked like.
+            let errors: Vec<String> = text
+                .lines()
+                .filter(|l| l.starts_with("error") || l.trim_start().starts_with("--> "))
+                .take(12)
+                .map(str::to_string)
+                .collect();
+            if errors.is_empty() {
+                let tail: Vec<&str> = text.lines().rev().take(10).collect();
+                tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+            } else {
+                errors.join("\n")
+            }
+        }
+        Err(e) => format!("cargo check could not be run: {e}"),
     };
     let rollback_ok = Command::new(cargo_exe)
         .args(["update", "--package", "moviebox-tui", "--precise", &old_version])
@@ -228,11 +255,11 @@ pub fn update_moviebox_tui() -> Result<String, String> {
         .is_ok_and(|o| o.status.success());
     if rollback_ok {
         Err(format!(
-            "moviebox-tui {new_version} doesn't compile against Trela's current code (breaking change in a \"compatible\" 0.x release) — rolled back to {old_version}. Code changes are needed before updating further."
+            "moviebox-tui {new_version} doesn't compile against Trela's current code (breaking change in a \"compatible\" 0.x release) — rolled back to {old_version}. Code changes are needed before updating further.\n\n{check_detail}"
         ))
     } else {
         Err(format!(
-            "moviebox-tui {new_version} doesn't compile against Trela's current code, AND rolling back to {old_version} failed too — run `cargo update -p moviebox-tui --precise {old_version}` manually in src-tauri."
+            "moviebox-tui {new_version} doesn't compile against Trela's current code, AND rolling back to {old_version} failed too — run `cargo update -p moviebox-tui --precise {old_version}` manually in src-tauri.\n\n{check_detail}"
         ))
     }
 }
