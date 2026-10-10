@@ -27,10 +27,11 @@ dist-ssr
 .vscode/
 .clinerules/
 .cursor/
-.github/
+# Ignore agent files under .github, but keep the CI workflows tracked
+.github/*
+!.github/workflows/
 .opencode/
 .superpowers/
-.github/
 .windsurf/
 # Rust / Tauri build output
 src-tauri/target

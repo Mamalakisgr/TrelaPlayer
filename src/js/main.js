@@ -65,18 +65,29 @@ function resumePositionFor(entry) {
   return pos >= dur - resumeTailFor(dur) ? undefined : pos;
 }
 
+// Opens a saved entry's (Continue Watching / Wishlist) own Details page —
+// built from just what the entry stored; selectAnime enriches a bare title
+// itself, and Back from there returns Home.
+function openEntryDetails(entry) {
+  detailsOrigin = 'home';
+  if (entry.kind === 'movie') selectMovie(entry);
+  else if (entry.kind === 'series') selectSeries(entry);
+  else selectAnime(entry);
+}
+
 function resumeContinueWatching(entry) {
   detailsOrigin = 'home';
   const kind = entry.kind || 'anime';
   // Resuming from Home skips the kind's own Details page, so its container is
   // either empty or (worse) still showing whatever different title was last
-  // browsed there this session — Back needs to point at Home instead of a
-  // Details page that was never populated for this entry. anime/series get
-  // this threaded through as backOverride so it survives every subsequent
+  // browsed there this session — the "← Title" crumb has to build that page
+  // for this entry rather than just showing it. anime/series get this
+  // threaded through as backOverride so it survives every subsequent
   // Next/Prev Episode click too (each one re-runs select*ToWatch, which used
   // to silently reset Back to Details/Series Details); movies have no episode
   // nav to repeat the reset, so the one-time override below still covers them.
-  const backOverride = { target: 'home', label: entry.title };
+  const openDetails = () => openEntryDetails({ ...entry, kind });
+  const backOverride = { target: openDetails, label: entry.title };
   if (kind === 'movie') {
     selectMovieToWatch({ title: entry.title, year: entry.year, image_url: entry.image_url }, resumePositionFor(entry));
   } else if (kind === 'series') {
@@ -96,7 +107,7 @@ function resumeContinueWatching(entry) {
   // before its first await, so this always runs after and wins. Redundant
   // for anime/series now that backOverride covers them, but still the only
   // thing doing it for movies.
-  setWatchingBackTarget('home', entry.title);
+  setWatchingBackTarget(openDetails, entry.title);
 }
 
 function continueWatchingSubtitle(entry) {
@@ -343,10 +354,7 @@ function renderNotifList() {
       const entry = findTrackedEntry(entries[Number(el.dataset.index)].itemId);
       document.getElementById('notif-dropdown').classList.add('hidden');
       if (!entry) return;
-      detailsOrigin = 'home';
-      if (entry.kind === 'movie') selectMovie(entry);
-      else if (entry.kind === 'series') selectSeries(entry);
-      else selectAnime(entry);
+      openEntryDetails(entry);
     });
   });
 }
@@ -712,17 +720,43 @@ function setDetailsBackdrop(elId, imageUrl) {
   if (el) el.style.backgroundImage = imageUrl ? `url("${imageUrl}")` : '';
 }
 
+// AniList's `episodes` is the planned total, and stays null for many shows
+// still airing (Black Clover Season 2); nextAiringEpisode is what says how
+// many are actually out. Unknown total -> just the released ones.
+function animeEpisodeCounts(meta) {
+  const released = meta.next_episode
+    ? meta.next_episode - 1
+    : meta.status === 'Not yet aired' ? 0 : meta.episodes || 0;
+  return { total: Math.max(meta.episodes || 0, released), released };
+}
+
+// TMDB episodes: no date yet, or one still ahead, means not out yet.
+function isEpisodeUnaired(ep) {
+  return !ep.air_date || ep.air_date > new Date().toLocaleDateString('en-CA'); // en-CA = local YYYY-MM-DD
+}
+
+function episodeButtonHtml(n, unaired) {
+  return unaired
+    ? `<button class="episode-btn is-unaired" disabled title="Not released yet">${n}</button>`
+    : `<button class="episode-btn" data-episode="${n}">${n}</button>`;
+}
+
 // Episode buttons are just 1..count generated locally — there's no fetch, and
 // no id, since ani-cli owns search/episode resolution entirely now (see
-// watch_episode). `anime` only needs a `title` for that to work later.
-function renderEpisodeGrid(anime, count) {
-  if (!count) return;
-  document.getElementById('episodes-card').classList.remove('hidden');
-  const numbers = Array.from({ length: count }, (_, i) => String(i + 1));
-  const html = numbers.map((n) => `<button class="episode-btn" data-episode="${n}">${n}</button>`).join('');
-  document.getElementById('episodes-list').innerHTML = html;
+// watch_episode). `anime` only needs a `title` for that to work later; `meta`
+// is whichever record carries the episode counts (see animeEpisodeCounts).
+function renderEpisodeGrid(anime, meta) {
+  const { total, released } = animeEpisodeCounts(meta);
+  const list = document.getElementById('episodes-list');
+  // Reset unconditionally: returning early here used to leave the previous
+  // title's buttons on screen, still wired to play the previous title.
+  list.innerHTML = '';
+  document.getElementById('episodes-card').classList.toggle('hidden', !total);
+  if (!total) return;
+  const numbers = Array.from({ length: released }, (_, i) => String(i + 1));
+  list.innerHTML = Array.from({ length: total }, (_, i) => episodeButtonHtml(i + 1, i >= released)).join('');
 
-  document.querySelectorAll('.episode-btn').forEach((btn) => {
+  list.querySelectorAll('.episode-btn:not([disabled])').forEach((btn) => {
     btn.addEventListener('click', function () {
       document.querySelectorAll('.episode-btn').forEach((b) => b.classList.remove('active'));
       this.classList.add('active');
@@ -758,7 +792,7 @@ async function selectAnime(anime) {
   } else {
     container.innerHTML = `<h3>${anime.title}</h3>`;
   }
-  renderEpisodeGrid(anime, anime.episodes);
+  renderEpisodeGrid(anime, anime);
   wireWishlistButton('anime-wishlist-btn', { id: anime.title, kind: 'anime', title: anime.title, image_url: anime.image_url });
   // Unlike wishlist, watched doesn't need image_url (no list view for it
   // yet), so id/kind/title are enough and it doesn't need re-wiring in the
@@ -791,7 +825,7 @@ async function selectAnime(anime) {
       // already a real (not local 1..N) episode number, and setting
       // anime.episodes would wrongly trigger the local->real remap below.
       anime.status = info.status;
-      renderEpisodeGrid(anime, info.episodes);
+      renderEpisodeGrid(anime, info);
       wireWishlistButton('anime-wishlist-btn', { id: anime.title, kind: 'anime', title: anime.title, image_url: info.image_url });
       loadAnimeRecommendations(info.id);
     }
@@ -820,6 +854,12 @@ async function loadAnimeRecommendations(id) {
 async function loadMediaRecommendations(mediaType, tmdbId, trackId, slideshowKey, onSelect) {
   if (!slideshows[slideshowKey]) {
     slideshows[slideshowKey] = createSlideshow(document.getElementById(trackId), { onSelect });
+  }
+  // Movies saved to Continue Watching before tmdb_id was stored there have
+  // nothing to look recommendations up by — an empty row, not an error.
+  if (!tmdbId) {
+    slideshows[slideshowKey].setItems([], movieCardHtml);
+    return;
   }
   slideshows[slideshowKey].loading();
   try {
@@ -1171,12 +1211,16 @@ async function loadSeriesEpisodes(series, seasonNumber) {
   episodesEl.innerHTML = '<p class="muted-center">Loading episodes...</p>';
   try {
     const episodes = await api.getSeasonEpisodes(series.tmdb_id, seasonNumber, getTmdbKey());
-    const numbers = episodes.map((ep) => ep.episode_number);
+    const numbers = episodes.filter((ep) => !isEpisodeUnaired(ep)).map((ep) => ep.episode_number);
     episodesEl.innerHTML = episodes
-      .map((ep) => `<button class="episode-btn" data-episode="${ep.episode_number}" title="${escapeAttr(ep.name)}">${ep.episode_number}</button>`)
+      .map((ep) =>
+        isEpisodeUnaired(ep)
+          ? episodeButtonHtml(ep.episode_number, true)
+          : `<button class="episode-btn" data-episode="${ep.episode_number}" title="${escapeAttr(ep.name)}">${ep.episode_number}</button>`
+      )
       .join('') || '<p class="muted-center">No episodes found</p>';
 
-    episodesEl.querySelectorAll('.episode-btn').forEach((btn) => {
+    episodesEl.querySelectorAll('.episode-btn:not([disabled])').forEach((btn) => {
       btn.addEventListener('click', function () {
         episodesEl.querySelectorAll('.episode-btn').forEach((b) => b.classList.remove('active'));
         this.classList.add('active');
@@ -1244,7 +1288,13 @@ function getSelectedStreamOption() {
 // initStreamOptionsSeg's change listener).
 function updateDownloadEligibility() {
   const option = getSelectedStreamOption();
-  document.getElementById('download-btn').disabled = !option || !!option.fourk_release;
+  document.getElementById('download-btn').disabled = !option || !isDownloadable(option);
+}
+
+// The downloader fetches one plain file: a 4KHDHub mirror page or a MovieBox
+// adaptive (DASH) manifest, which needs headers, isn't one.
+function isDownloadable(option) {
+  return !option.fourk_release && !(option.headers && option.headers.length);
 }
 
 // MovieBox and 4KHDHub options are merged into one flat list (see
@@ -1548,7 +1598,7 @@ function formatBytes(bytes) {
 async function startDownloadAndPlay() {
   if (!pendingPlay || (pendingPlay.kind !== 'movie' && pendingPlay.kind !== 'series')) return;
   const option = getSelectedStreamOption();
-  if (!option || option.fourk_release) return; // download fallback is MovieBox-only for now
+  if (!option || !isDownloadable(option)) return;
 
   const downloadBtn = document.getElementById('download-btn');
   const subtitleUrl = document.getElementById('watch-subtitle-select').value || undefined;
@@ -1567,7 +1617,7 @@ async function startDownloadAndPlay() {
     const watchId = pendingPlay.kind === 'movie' ? `movie:${pendingPlay.title}` : `series:${pendingPlay.title}`;
     saveContinueWatching(
       pendingPlay.kind === 'movie'
-        ? { id: watchId, kind: 'movie', title: pendingPlay.title, year: pendingPlay.year, image_url: pendingPlay.image_url }
+        ? { id: watchId, kind: 'movie', title: pendingPlay.title, year: pendingPlay.year, tmdb_id: pendingPlay.tmdb_id, image_url: pendingPlay.image_url }
         : {
             id: watchId,
             kind: 'series',
@@ -1594,12 +1644,12 @@ function initDownloadEvents() {
   });
   onEvent('download-complete', (payload) => {
     setDownloadProgress(100, 'Download complete — playing...');
-    document.getElementById('download-btn').disabled = false;
+    updateDownloadEligibility();
     setPlayerStatus(`Downloaded to ${payload.path}`);
   });
   onEvent('download-error', (payload) => {
     setDownloadProgress(null, '');
-    document.getElementById('download-btn').disabled = false;
+    updateDownloadEligibility();
     setPlayerStatus(`Download error: ${payload.message}`, { error: true });
   });
 }
@@ -1661,9 +1711,13 @@ function initPlaybackProgressEvents() {
   });
 }
 
+// target: a view name to show, or a function that opens the page itself (a
+// resumed entry's Details page has to be built, not just shown).
+let watchingBackAction = null;
 function setWatchingBackTarget(target, crumbTitle) {
   const btn = document.getElementById('watching-back-btn');
-  btn.dataset.back = target;
+  watchingBackAction = typeof target === 'function' ? target : null;
+  btn.dataset.back = watchingBackAction ? '' : target;
   btn.innerHTML = crumbTitle ? `&larr; ${crumbTitle}` : '&larr; Back';
 }
 
@@ -1757,8 +1811,9 @@ function renderEpisodeTrack(episodes, current, { ariaLabel, sub, onSelect }) {
     .map((ep) => {
       const isCurrent = ep.episode_number === current;
       const style = ep.still_url ? ` style="background-image:${cssUrl(ep.still_url)}"` : '';
+      const unaired = ep.is_unaired && !isCurrent;
       return `
-        <div class="watch-ep-card${isCurrent ? ' is-current' : ''}" data-episode="${ep.episode_number}" role="button" tabindex="0" aria-current="${isCurrent ? 'true' : 'false'}" aria-label="${escapeAttr(ariaLabel(ep, isCurrent))}">
+        <div class="watch-ep-card${isCurrent ? ' is-current' : ''}${unaired ? ' is-unaired' : ''}" data-episode="${ep.episode_number}" role="button" tabindex="${unaired ? -1 : 0}"${unaired ? ' aria-disabled="true"' : ''} aria-current="${isCurrent ? 'true' : 'false'}" aria-label="${escapeAttr(ariaLabel(ep, isCurrent))}">
           <div class="watch-ep-thumb${ep.is_fallback ? ' is-fallback' : ''}"${style}>
             <span class="watch-ep-badge watch-ep-num">${ep.episode_number}</span>
             ${isCurrent ? '<span class="watch-ep-badge watch-ep-state">Playing</span>' : ''}
@@ -1771,7 +1826,7 @@ function renderEpisodeTrack(episodes, current, { ariaLabel, sub, onSelect }) {
         </div>`;
     })
     .join('');
-  track.querySelectorAll('.watch-ep-card').forEach((card) => {
+  track.querySelectorAll('.watch-ep-card:not(.is-unaired)').forEach((card) => {
     card.addEventListener('click', () => onSelect(card.dataset.episode));
   });
   // scrollLeft, never scrollIntoView — the latter can drag ancestor scroll
@@ -1804,7 +1859,7 @@ let animeStillsRequestId = 0;
 // Watching/Recent Episodes entries never carry one).
 async function renderAnimeEpisodeStrip(anime, episodeNum, goTo) {
   const section = document.getElementById('watch-episodes');
-  const total = anime.episodes;
+  const { total, released } = animeEpisodeCounts(anime);
   if (!total) {
     section.classList.add('hidden');
     return;
@@ -1812,7 +1867,9 @@ async function renderAnimeEpisodeStrip(anime, episodeNum, goTo) {
   section.classList.remove('hidden');
   document.getElementById('watch-episodes-season-pills').innerHTML = '';
   const countEl = document.getElementById('watch-episodes-count');
-  countEl.textContent = `${total} episode${total === 1 ? '' : 's'}`;
+  countEl.textContent = released < total
+    ? `${released} of ${total} episodes out`
+    : `${total} episode${total === 1 ? '' : 's'}`;
   countEl.classList.remove('hidden');
   // Synchronously, before the await: nothing else clears the track, so the
   // previous title's cards would otherwise sit there — "Playing" badge on the
@@ -1831,10 +1888,11 @@ async function renderAnimeEpisodeStrip(anime, episodeNum, goTo) {
     episode_number: String(i + 1),
     still_url: stills[i] || anime.image_url,
     is_fallback: !stills[i],
+    is_unaired: i >= released,
   }));
   renderEpisodeTrack(episodes, String(episodeNum), {
-    ariaLabel: (ep, isCurrent) => `Episode ${ep.episode_number}${isCurrent ? ' — Now playing' : ''}`,
-    sub: (ep, isCurrent) => (isCurrent ? 'Now playing' : ''),
+    ariaLabel: (ep, isCurrent) => `Episode ${ep.episode_number}${isCurrent ? ' — Now playing' : ep.is_unaired ? ' — Not released yet' : ''}`,
+    sub: (ep, isCurrent) => (isCurrent ? 'Now playing' : ep.is_unaired ? 'Not released yet' : ''),
     onSelect: goTo,
   });
 }
@@ -1857,12 +1915,17 @@ async function renderSeriesEpisodeStrip(series, season, episode, jumpTo) {
 
   const showSeason = async (browsedSeason) => {
     try {
-      const episodes = await api.getSeasonEpisodes(series.tmdb_id, browsedSeason, getTmdbKey());
+      const episodes = (await api.getSeasonEpisodes(series.tmdb_id, browsedSeason, getTmdbKey()))
+        .map((ep) => ({ ...ep, is_unaired: isEpisodeUnaired(ep) }));
       track.scrollLeft = 0;
+      // "Airs Oct 15" when TMDB has a date, so the greyed card says when.
+      const unairedLabel = (ep) => (ep.air_date
+        ? `Airs ${new Date(`${ep.air_date}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+        : 'Not released yet');
       renderEpisodeTrack(episodes, browsedSeason === season ? episode : -1, {
         ariaLabel: (ep, isCurrent) =>
-          `Season ${browsedSeason}, episode ${ep.episode_number}${isCurrent ? ' — Now playing' : ep.runtime ? ` — Not watched · ${ep.runtime} min` : ' — Not watched'}`,
-        sub: (ep, isCurrent) => (isCurrent ? 'Now playing' : ep.runtime ? `${ep.runtime} min` : ''),
+          `Season ${browsedSeason}, episode ${ep.episode_number}${isCurrent ? ' — Now playing' : ep.is_unaired ? ` — ${unairedLabel(ep)}` : ep.runtime ? ` — Not watched · ${ep.runtime} min` : ' — Not watched'}`,
+        sub: (ep, isCurrent) => (isCurrent ? 'Now playing' : ep.is_unaired ? unairedLabel(ep) : ep.runtime ? `${ep.runtime} min` : ''),
         onSelect: (num) => jumpTo(browsedSeason, Number(num)),
       });
     } catch (e) {
@@ -1885,6 +1948,13 @@ async function renderSeriesEpisodeStrip(series, season, episode, jumpTo) {
         showSeason(Number(pill.dataset.season));
       });
     });
+    // The pill row scrolls sideways, so season 29 of 29 would start out of
+    // view. Centre it by hand: scrollIntoView would also scroll the page.
+    const active = pillsEl.querySelector('.watch-season-pill.active');
+    if (active) {
+      const offset = active.getBoundingClientRect().left - pillsEl.getBoundingClientRect().left;
+      pillsEl.scrollLeft += offset - (pillsEl.clientWidth - active.offsetWidth) / 2;
+    }
   } catch (e) {
     pillsEl.innerHTML = '';
   }
@@ -1984,7 +2054,7 @@ function selectEpisode(anime, episodeNum, quality, episodeNumbers, backOverride)
 
 async function selectMovieToWatch(movie, resumeSeconds) {
   enterWatching(
-    { kind: 'movie', title: movie.title, year: movie.year, image_url: movie.image_url, resumeSeconds },
+    { kind: 'movie', title: movie.title, year: movie.year, tmdb_id: movie.tmdb_id, image_url: movie.image_url, resumeSeconds },
     { backTarget: 'movie-details', crumbTitle: movie.title, title: movie.title }
   );
   document.getElementById('watch-episodes').classList.add('hidden');
@@ -2129,7 +2199,7 @@ async function startPlayback() {
               pendingPlay.resumeSeconds,
               watchId
             )
-          : api.playStream(opt.resource_link, windowTitle, opt.subject_id, opt.resource_id, pendingPlay.resumeSeconds, watchId);
+          : api.playStream(opt.resource_link, windowTitle, opt.subject_id, opt.resource_id, opt.headers, pendingPlay.resumeSeconds, watchId);
 
       try {
         setPlayerStatus(await playViaOption(option));
@@ -2164,7 +2234,7 @@ async function startPlayback() {
         : {};
       saveContinueWatching(
         pendingPlay.kind === 'movie'
-          ? { id: watchId, kind: 'movie', title: pendingPlay.title, year: pendingPlay.year, image_url: pendingPlay.image_url, ...progress }
+          ? { id: watchId, kind: 'movie', title: pendingPlay.title, year: pendingPlay.year, tmdb_id: pendingPlay.tmdb_id, image_url: pendingPlay.image_url, ...progress }
           : {
               id: watchId,
               kind: 'series',
@@ -2187,61 +2257,77 @@ async function startPlayback() {
 
 // ---------- Command palette ----------
 
-const NAV_DESTINATIONS = [
-  { view: 'home', label: 'Home' },
-  { view: 'browse', label: 'Browse' },
-  { view: 'movies', label: 'Movies' },
-  { view: 'series', label: 'Series' },
-  { view: 'about', label: 'About' },
-];
+// One search across all three catalogs, grouped by kind: anime from AniList
+// (played through ani-cli), movies and series from TMDB (played through
+// MovieBox/4KHDHub). Page navigation is the navbar's job, not the palette's.
+const PALETTE_SECTION_LIMIT = 6;
+let paletteOpeners = []; // index -> opens that result's Details page
+let paletteActive = -1; // keyboard-highlighted result
+let paletteRequestId = 0;
 
-let paletteAnimeResults = [];
-
-function paletteNavHtml() {
-  return NAV_DESTINATIONS.map((d) => `<div class="dialog-item" data-nav="${d.view}"><span class="dialog-item-title">${d.label}</span><span class="tag tag-outline">Go to</span></div>`).join('');
+function paletteItemHtml(item, index, tag, sub) {
+  const thumb = item.image_url
+    ? `<img class="dialog-item-thumb" src="${escapeAttr(item.image_url)}" alt="" loading="lazy" />`
+    : '<span class="dialog-item-thumb"></span>';
+  return `<div class="dialog-item" data-index="${index}">${thumb}<span class="dialog-item-title">${escapeAttr(item.title)}${sub ? `<span class="dialog-item-sub">${escapeAttr(sub)}</span>` : ''}</span><span class="tag tag-outline">${tag}</span></div>`;
 }
 
-function wirePaletteNav(el) {
-  el.querySelectorAll('[data-nav]').forEach((item) => {
-    item.addEventListener('click', () => {
-      closePalette();
-      switchView(item.dataset.nav);
-    });
-  });
+function openPaletteResult(index) {
+  const open = paletteOpeners[index];
+  if (!open) return;
+  closePalette();
+  detailsOrigin = 'home';
+  open();
 }
 
-// Anime + nav only. Movies/Series have their own dedicated search grid
-// (with genre/year filters and full pagination) — duplicating that into a
-// 5-row palette list was a worse version of a page that already exists;
-// Ctrl+K for those now just jumps to Movies/Series via "Go to" instead.
+function setPaletteActive(index) {
+  const items = document.querySelectorAll('#palette-results .dialog-item');
+  if (!items.length) return;
+  paletteActive = (index + items.length) % items.length;
+  items.forEach((el, i) => el.classList.toggle('is-active', i === paletteActive));
+  items[paletteActive].scrollIntoView({ block: 'nearest' });
+}
+
 async function renderPaletteResults(query) {
   const el = document.getElementById('palette-results');
+  const requestId = ++paletteRequestId;
+  paletteOpeners = [];
+  paletteActive = -1;
   if (!query.trim()) {
-    el.innerHTML = `<div class="dialog-section-label">Go to</div>${paletteNavHtml()}`;
-    wirePaletteNav(el);
+    el.innerHTML = '<div class="dialog-empty">Search anime, movies and series</div>';
     return;
   }
 
-  paletteAnimeResults = await api.searchAnimeMeta(query).catch(() => []);
+  const tmdbKey = getTmdbKey();
+  const [anime, media] = await Promise.all([
+    api.searchAnimeMeta(query).catch(() => []),
+    tmdbKey ? api.searchMovies(query, tmdbKey, 1).then((r) => r.results).catch(() => []) : [],
+  ]);
+  // A search fires on every typing pause; a slower earlier one must not
+  // overwrite the results of a newer one.
+  if (requestId !== paletteRequestId) return;
 
-  const animeHtml = paletteAnimeResults
-    .slice(0, 8)
-    .map((a, i) => `<div class="dialog-item" data-anime-index="${i}"><span class="dialog-item-title">${a.title}</span><span class="tag tag-outline">Anime</span></div>`)
-    .join('');
+  const sections = [
+    { label: 'Anime', tag: 'Anime', items: anime, open: selectAnime, sub: (a) => (a.episodes ? `${a.episodes} episodes` : a.status) },
+    { label: 'Movies', tag: 'Movie', items: media.filter((m) => m.media_type === 'movie'), open: selectMovie, sub: (m) => m.year },
+    { label: 'Series', tag: 'Series', items: media.filter((m) => m.media_type === 'tv'), open: selectSeries, sub: (m) => m.year },
+  ];
+  let html = '';
+  for (const section of sections) {
+    const items = section.items.slice(0, PALETTE_SECTION_LIMIT);
+    if (!items.length) continue;
+    html += `<div class="dialog-section-label">${section.label}</div>`;
+    for (const item of items) {
+      html += paletteItemHtml(item, paletteOpeners.length, section.tag, section.sub(item));
+      paletteOpeners.push(() => section.open(item));
+    }
+  }
+  if (!paletteOpeners.length) html += `<div class="dialog-empty">No matches for "${escapeAttr(query.trim())}"</div>`;
+  if (!tmdbKey) html += '<div class="dialog-empty">Add a free TMDB key on the About page to search movies &amp; series too.</div>';
+  el.innerHTML = html;
 
-  el.innerHTML = `
-    <div class="dialog-section-label">Go to</div>${paletteNavHtml()}
-    ${animeHtml ? `<div class="dialog-section-label">Anime</div>${animeHtml}` : '<div class="dialog-empty">No anime matches — try Movies/Series above for movies &amp; series</div>'}
-  `;
-  wirePaletteNav(el);
-
-  el.querySelectorAll('[data-anime-index]').forEach((item) => {
-    item.addEventListener('click', () => {
-      const anime = paletteAnimeResults[Number(item.dataset.animeIndex)];
-      closePalette();
-      detailsOrigin = 'home';
-      selectAnime(anime);
-    });
+  el.querySelectorAll('.dialog-item').forEach((item) => {
+    item.addEventListener('click', () => openPaletteResult(Number(item.dataset.index)));
   });
 }
 
@@ -2266,6 +2352,15 @@ function initCommandPalette() {
     if (e.target === overlay) closePalette();
   });
   input.addEventListener('input', debounce((e) => renderPaletteResults(e.target.value), 300));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      // Nothing highlighted yet: Down starts at the first result, Up at the last.
+      setPaletteActive(paletteActive === -1 && e.key === 'ArrowUp' ? -1 : paletteActive + (e.key === 'ArrowDown' ? 1 : -1));
+    } else if (e.key === 'Enter') {
+      openPaletteResult(Math.max(paletteActive, 0));
+    }
+  });
 
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -2299,7 +2394,10 @@ function initNav() {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
   document.querySelectorAll('.back-btn').forEach((btn) => {
-    btn.addEventListener('click', () => showView(btn.dataset.back));
+    btn.addEventListener('click', () => {
+      if (btn.id === 'watching-back-btn' && watchingBackAction) watchingBackAction();
+      else showView(btn.dataset.back);
+    });
   });
 }
 

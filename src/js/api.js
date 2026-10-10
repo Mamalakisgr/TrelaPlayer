@@ -60,8 +60,8 @@ export const api = {
   // find_playable_subject/find_playable_release in the backend.
   getStreamOptions: (title, season, episode, subjectId, year) =>
     invoke('get_stream_options', { title, season, episode, subjectId, year: year ? Number(year) : undefined }),
-  playStream: (resourceLink, windowTitle, subjectId, resourceId, startSeconds, watchId) =>
-    invoke('play_stream', { resourceLink, windowTitle, subjectId, resourceId, startSeconds: startSeconds || undefined, watchId }),
+  playStream: (resourceLink, windowTitle, subjectId, resourceId, headers, startSeconds, watchId) =>
+    invoke('play_stream', { resourceLink, windowTitle, subjectId, resourceId, headers, startSeconds: startSeconds || undefined, watchId }),
   getMovieSubject: (title, year) => invoke('get_movie_subject', { title, year: year ? Number(year) : undefined }),
   getSubtitleOptions: (subjectId, resourceId) => invoke('get_subtitle_options', { subjectId, resourceId }),
   startDownload: (resourceLink, title, season, episode, windowTitle, subtitleUrl) =>

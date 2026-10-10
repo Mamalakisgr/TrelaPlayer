@@ -98,6 +98,9 @@ pub struct TvEpisode {
     pub name: String,
     pub still_url: Option<String>,
     pub runtime: Option<u32>,
+    // "YYYY-MM-DD"; None when TMDB has no date yet. The frontend greys out
+    // episodes that haven't aired.
+    pub air_date: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -121,6 +124,10 @@ pub struct StreamOption {
     // encode can fall back across — shown in the GUI the same way
     // moviebox-tui's own stream list shows "N mirrors" per encode.
     pub mirrors: u32,
+    // HTTP headers mpv must send for resource_link to play — set only for
+    // MovieBox's play-info streams, which are refused without their
+    // Referer/User-Agent and signed Cookie (see play_info_options).
+    pub headers: Vec<(String, String)>,
 }
 
 // A dubbed-language variant of a title — MovieBox treats each dub as its own

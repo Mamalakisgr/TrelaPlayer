@@ -3,6 +3,7 @@ use crate::models::{
     StreamOption, SubtitleOption,
 };
 use moviebox_tui::download::{download, safe_file_stem, DownloadOutcome};
+use moviebox_tui::providers::moviebox::adapt::{is_deprecation_notice_url, moviebox_play_info_json_to_releases};
 use moviebox_tui::providers::moviebox::client::MovieBoxClient;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -319,7 +320,9 @@ pub(crate) fn extract_stream_options(subject_id: &str, items: &[serde_json::Valu
         .iter()
         .filter_map(|item| {
             Some(StreamOption {
-                resource_link: item["resourceLink"].as_str()?.to_string(),
+                // MovieBox now hands out the same "update the app" clip as
+                // every item's resourceLink; see play_info_options.
+                resource_link: item["resourceLink"].as_str().filter(|link| !is_deprecation_notice_url(link))?.to_string(),
                 resolution: item["resolution"].as_u64().unwrap_or(0),
                 codec: item["codecName"].as_str().unwrap_or("unknown").to_uppercase(),
                 size: format_size(item["size"].as_str().unwrap_or("0")),
@@ -340,11 +343,57 @@ pub(crate) fn extract_stream_options(subject_id: &str, items: &[serde_json::Valu
                 resource_id: item["resourceId"].as_str().unwrap_or("").to_string(),
                 fourk_release: item.get("_fourk_release").cloned(),
                 mirrors: item["sourceCount"].as_u64().unwrap_or(0) as u32,
+                headers: Vec::new(),
             })
         })
         .collect();
     options.sort_by(|a, b| b.resolution.cmp(&a.resolution));
     options
+}
+
+// Since MovieBox started answering every /resource item with an "update the
+// app" clip (dropped in extract_stream_options), the real stream comes from
+// play-info instead — the same route moviebox-tui's own player takes: a DASH
+// manifest holding every resolution, which only plays with the Referer,
+// User-Agent and signed Cookie headers the crate's adapter returns with it.
+// Best-effort: any failure just leaves the /resource options on their own.
+async fn play_info_options(
+    client: &MovieBoxClient,
+    subject_id: &str,
+    season: usize,
+    episode: usize,
+    items: &[serde_json::Value],
+) -> Vec<StreamOption> {
+    let Ok(json) = client.get_play_info(subject_id, season, episode).await else {
+        return Vec::new();
+    };
+    // Subtitles are keyed by the /resource items' resourceId; asking for
+    // play-info's own stream id returns none.
+    let caption_resource_id = items.iter().find_map(|item| item["resourceId"].as_str()).unwrap_or_default().to_string();
+    let mut seen = std::collections::HashSet::new();
+    moviebox_play_info_json_to_releases(&json, season, episode, client.user_agent())
+        .into_iter()
+        .filter_map(|release| {
+            // One release per resolution, all pointing at the same manifest,
+            // highest first — and mpv plays the best track from it anyway.
+            let mirror = release.mirrors.into_iter().next()?;
+            if !seen.insert(mirror.resolver_url.clone()) {
+                return None;
+            }
+            Some(StreamOption {
+                resource_link: mirror.resolver_url,
+                resolution: release.quality.as_deref().and_then(|q| q.trim_end_matches('p').parse().ok()).unwrap_or(0),
+                codec: release.codec.unwrap_or_else(|| "unknown".to_string()).to_uppercase(),
+                size: format_size(&release.size_bytes.unwrap_or(0).to_string()),
+                uploader: "MovieBox (adaptive)".to_string(),
+                subject_id: subject_id.to_string(),
+                resource_id: caption_resource_id.clone(),
+                fourk_release: None,
+                mirrors: 0,
+                headers: mirror.headers,
+            })
+        })
+        .collect()
 }
 
 // Best-effort: subtitles are a nice-to-have, so any failure here just means
@@ -381,11 +430,20 @@ fn spawn_mpv(
     url: &str,
     window_title: &str,
     sub_files: &[String],
+    headers: &[(String, String)],
     start_seconds: Option<f64>,
     watch_id: String,
 ) -> Result<(), String> {
     let mut sidecar = app.shell().sidecar("mpv").map_err(|e| format!("Failed to resolve bundled mpv: {}", e))?;
     sidecar = sidecar.arg(format!("--force-media-title={}", window_title));
+    // One -append per header: the plain list option splits on commas.
+    for (name, value) in headers {
+        sidecar = sidecar.arg(match name.to_ascii_lowercase().as_str() {
+            "referer" => format!("--referrer={value}"),
+            "user-agent" => format!("--user-agent={value}"),
+            _ => format!("--http-header-fields-append={name}: {value}"),
+        });
+    }
     if let Some(start) = start_seconds {
         sidecar = sidecar.arg(format!("--start={start}"));
     }
@@ -408,11 +466,20 @@ fn spawn_mpv(
         // that stall never recovers on its own; ffmpeg's own reconnect
         // options (mpv's network demuxers run on ffmpeg) make it retry
         // instead of hanging.
+        //
+        // Except reconnect_at_eof for a DASH manifest (MovieBox play-info):
+        // the manifest is a small file whose normal end it treats as a drop,
+        // retrying until opening fails and mpv exits before showing a window.
+        let is_dash = url.split('?').next().is_some_and(|path| path.ends_with(".mpd"));
         sidecar = sidecar.args([
             "--cache=yes",
             "--demuxer-max-bytes=500MiB",
             "--demuxer-max-back-bytes=150MiB",
-            "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_at_eof=1,reconnect_delay_max=5",
+            if is_dash {
+                "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5"
+            } else {
+                "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_at_eof=1,reconnect_delay_max=5"
+            },
         ]);
     }
     for sub in sub_files {
@@ -446,7 +513,8 @@ pub async fn get_stream_options(
         None => find_playable_subject(&client, &title, season as usize, episode as usize, year).await?,
     };
 
-    let options = extract_stream_options(&subject_id, &items);
+    let mut options = play_info_options(&client, &subject_id, season as usize, episode as usize, &items).await;
+    options.extend(extract_stream_options(&subject_id, &items));
     if options.is_empty() {
         return Err("No playable source found for this title/episode.".to_string());
     }
@@ -481,12 +549,13 @@ pub async fn play_stream(
     window_title: String,
     subject_id: String,
     resource_id: String,
+    headers: Option<Vec<(String, String)>>,
     start_seconds: Option<f64>,
     watch_id: String,
 ) -> Result<String, String> {
     let client = get_client().await?;
     let sub_files = fetch_caption_urls(&client, &subject_id, &resource_id).await;
-    spawn_mpv(&app, &resource_link, &window_title, &sub_files, start_seconds, watch_id)?;
+    spawn_mpv(&app, &resource_link, &window_title, &sub_files, &headers.unwrap_or_default(), start_seconds, watch_id)?;
     Ok(format!("Playing \"{}\"", window_title))
 }
 
@@ -582,7 +651,7 @@ pub async fn start_download(
                 let path = destination.to_string_lossy().into_owned();
                 let _ = app.emit("download-complete", DownloadCompleteEvent { path: path.clone() });
                 let watch_id = if season == 0 && episode == 0 { format!("movie:{title}") } else { format!("series:{title}") };
-                if let Err(e) = spawn_mpv(&app, &path, &window_title, &sub_files, None, watch_id) {
+                if let Err(e) = spawn_mpv(&app, &path, &window_title, &sub_files, &[], None, watch_id) {
                     let _ = app.emit("download-error", DownloadErrorEvent { message: e });
                 }
             }
