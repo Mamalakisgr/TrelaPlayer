@@ -1,7 +1,9 @@
-use crate::procutil::find_exe;
-use std::io::Read;
+use crate::procutil::{find_tool, tool_path_env, ANIME_SETUP_HINT};
+use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+use tauri::path::BaseDirectory;
+use tauri::{AppHandle, Emitter, Manager};
 
 fn ani_cli_path() -> String {
     // The extensionless "ani-cli" shim is a POSIX shell script and isn't
@@ -11,7 +13,23 @@ fn ani_cli_path() -> String {
     } else {
         &["ani-cli"]
     };
-    find_exe(names).unwrap_or_else(|| names[0].to_string())
+    find_tool(names).unwrap_or_else(|| names[0].to_string())
+}
+
+// Every ani-cli run goes through here so it can see the tools dir and the
+// bundled mpv (see tool_path_env).
+fn ani_cli_command() -> Command {
+    let mut cmd = Command::new(ani_cli_path());
+    cmd.env("PATH", tool_path_env());
+    cmd
+}
+
+fn launch_error(action: &str, e: std::io::Error) -> String {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        ANIME_SETUP_HINT.to_string()
+    } else {
+        format!("Failed to {}: {}", action, e)
+    }
 }
 
 // ani-cli's die() wraps its error text in ANSI color codes (via `printf
@@ -48,11 +66,10 @@ fn strip_ansi(s: &str) -> String {
 // to work out — it can be global across seasons, not always 1..N).
 #[tauri::command]
 pub fn watch_episode(query: &str, index: u32, episode: &str, quality: &str) -> Result<String, String> {
-    let path = ani_cli_path();
     let index = index.to_string();
     let quality = if quality.is_empty() { "best" } else { quality };
 
-    let mut child = Command::new(&path)
+    let mut child = ani_cli_command()
         // --exit-after-play: run the player in the foreground and quit
         // ani-cli as soon as it closes, instead of dropping into
         // ani-cli's own next/replay/quality terminal menu afterward.
@@ -60,7 +77,7 @@ pub fn watch_episode(query: &str, index: u32, episode: &str, quality: &str) -> R
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to launch ani-cli: {}", e))?;
+        .map_err(|e| launch_error("launch ani-cli", e))?;
 
     // ani-cli validates the search result and episode against its own
     // (different) source before it ever gets far enough to launch a player,
@@ -118,12 +135,10 @@ pub fn update_ani_cli() -> Result<String, String> {
     // `ani-cli -U` self-updates: it diffs the running script against the
     // latest master and patches itself in place. It's fully non-interactive
     // (no prompts), so this is safe to block on and run straight from the UI.
-    let path = ani_cli_path();
-
-    let output = Command::new(&path)
+    let output = ani_cli_command()
         .arg("-U")
         .output()
-        .map_err(|e| format!("Failed to run ani-cli -U: {}", e))?;
+        .map_err(|e| launch_error("run ani-cli -U", e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if !output.status.success() {
@@ -137,16 +152,76 @@ pub fn update_ani_cli() -> Result<String, String> {
 
 #[tauri::command]
 pub fn get_ani_cli_version() -> Result<String, String> {
-    let path = ani_cli_path();
-    let output = Command::new(&path)
+    let output = ani_cli_command()
         .arg("--version")
         .output()
-        .map_err(|e| format!("Failed to run ani-cli: {}", e))?;
+        .map_err(|e| launch_error("run ani-cli", e))?;
     let text = strip_ansi(&String::from_utf8_lossy(&output.stdout));
     if text.is_empty() {
         return Err("ani-cli --version returned no output".to_string());
     }
     Ok(text)
+}
+
+// Runs scripts/setup-anime.ps1 (bundled as a resource, see tauri.conf.json),
+// streaming each line it prints to the About page as an "anime-setup-log"
+// event: on a machine without Git it downloads ~65 MB, too long to sit on a
+// silent spinner. The full log is also the return value, so the page ends on
+// the complete transcript either way.
+#[tauri::command]
+pub async fn setup_anime_tools(app: AppHandle) -> Result<String, String> {
+    let script = app
+        .path()
+        .resolve("setup-anime.ps1", BaseDirectory::Resource)
+        .map_err(|e| format!("Couldn't locate the bundled setup script: {}", e))?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = Command::new("powershell.exe");
+        cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&script)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let mut child = cmd.spawn().map_err(|e| format!("Failed to start PowerShell: {}", e))?;
+
+        // Lossy, line by line: PowerShell writes in the console's code page,
+        // and one non-UTF-8 byte (a localized error message) must not stop
+        // the read and leave the script blocked on a full pipe.
+        let mut log = String::new();
+        if let Some(stdout) = child.stdout.take() {
+            let mut reader = BufReader::new(stdout);
+            let mut buf = Vec::new();
+            while reader.read_until(b'\n', &mut buf).is_ok_and(|n| n > 0) {
+                let line = String::from_utf8_lossy(&buf).trim_end().to_string();
+                buf.clear();
+                let _ = app.emit("anime-setup-log", &line);
+                log.push_str(&line);
+                log.push('\n');
+            }
+        }
+        let mut stderr = Vec::new();
+        if let Some(mut s) = child.stderr.take() {
+            let _ = s.read_to_end(&mut stderr);
+        }
+        log.push_str(&String::from_utf8_lossy(&stderr));
+
+        let status = child.wait().map_err(|e| format!("Setup script didn't finish: {}", e))?;
+        let log = log.trim().to_string();
+        if status.success() {
+            Ok(log)
+        } else if log.is_empty() {
+            Err(format!("Setup script exited with status {}", status))
+        } else {
+            Err(log)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // moviebox-tui is compiled directly into this binary, not shelled out to, so

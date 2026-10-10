@@ -167,6 +167,11 @@ pub struct PlaybackProgressEvent {
     pub watch_id: String,
     pub position_seconds: Option<f64>,
     pub duration_seconds: Option<f64>,
+    /// mpv's own exit code. The frontend needs this to tell "played to the
+    /// end" apart from "killed": mpv deletes its watch-later file on a clean
+    /// EOF, so a finished episode and an abruptly-killed one both arrive with
+    /// `position_seconds: None`, and only the exit code separates them.
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Serialize, Clone)]

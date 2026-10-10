@@ -153,7 +153,17 @@ pub fn track(app: AppHandle, mut rx: Receiver<CommandEvent>, setup: Option<Track
             tauri::async_runtime::spawn(async move { query_duration(&pipe_name).await })
         });
 
-        while rx.recv().await.is_some() {}
+        // Still drains every event so mpv never blocks on a full pipe, but
+        // now keeps the exit code off the Terminated event instead of
+        // discarding it. Without it the frontend cannot tell a clean EOF from
+        // an abrupt kill — mpv deletes its watch-later file in the first case
+        // and never writes one in the second, so both look identical.
+        let mut exit_code = None;
+        while let Some(event) = rx.recv().await {
+            if let CommandEvent::Terminated(payload) = event {
+                exit_code = payload.code;
+            }
+        }
 
         let Some(setup) = setup else { return };
         let duration_seconds = match duration_task {
@@ -165,7 +175,7 @@ pub fn track(app: AppHandle, mut rx: Receiver<CommandEvent>, setup: Option<Track
 
         let _ = app.emit(
             "playback-progress",
-            PlaybackProgressEvent { watch_id, position_seconds, duration_seconds },
+            PlaybackProgressEvent { watch_id, position_seconds, duration_seconds, exit_code },
         );
     });
 }

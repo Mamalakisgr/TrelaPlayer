@@ -47,6 +47,24 @@ function switchView(view) {
 // straight to the Watching page for whatever kind of entry was saved.
 // Missing `kind` (entries saved before movies/series were supported) is
 // treated as 'anime' so old localStorage data still resumes correctly.
+// mpv writes a resume position whenever it quits — including quitting during
+// the credits — so a finished item ends up stored at (or a hair under) its
+// full duration. Handing that back as --start opens mpv at EOF and it exits
+// instantly, which reads as the player refusing to reopen the episode at all.
+// Anything inside the tail counts as finished and starts over instead.
+// Deliberately applied on read rather than on save, so entries already stored
+// that way are fixed without needing a migration.
+const RESUME_TAIL_SECONDS = 15;
+function resumeTailFor(durationSeconds) {
+  return Math.max(RESUME_TAIL_SECONDS, durationSeconds * 0.02);
+}
+function resumePositionFor(entry) {
+  const pos = entry.positionSeconds;
+  const dur = entry.durationSeconds;
+  if (pos == null || !dur) return undefined;
+  return pos >= dur - resumeTailFor(dur) ? undefined : pos;
+}
+
 function resumeContinueWatching(entry) {
   detailsOrigin = 'home';
   const kind = entry.kind || 'anime';
@@ -60,7 +78,7 @@ function resumeContinueWatching(entry) {
   // nav to repeat the reset, so the one-time override below still covers them.
   const backOverride = { target: 'home', label: entry.title };
   if (kind === 'movie') {
-    selectMovieToWatch({ title: entry.title, year: entry.year, image_url: entry.image_url }, entry.positionSeconds);
+    selectMovieToWatch({ title: entry.title, year: entry.year, image_url: entry.image_url }, resumePositionFor(entry));
   } else if (kind === 'series') {
     selectSeriesEpisodeToWatch(
       { title: entry.title, year: entry.year, tmdb_id: entry.tmdb_id, image_url: entry.image_url },
@@ -68,7 +86,7 @@ function resumeContinueWatching(entry) {
       entry.episode,
       undefined,
       backOverride,
-      entry.positionSeconds
+      resumePositionFor(entry)
     );
   } else {
     selectEpisode({ title: entry.title, status: entry.status, image_url: entry.image_url }, entry.episode, entry.quality, undefined, backOverride);
@@ -1591,14 +1609,54 @@ function initDownloadEvents() {
 // used for this entry, not by "whatever pendingPlay currently is" (mpv can
 // still be open, and later closed, well after the user has navigated
 // elsewhere in the app).
+// Two different shapes mean "watched it":
+//   - no saved position but mpv exited cleanly. mpv deletes its watch-later
+//     file on a clean EOF, so a fully-played file reports no position at all.
+//     An abrupt kill leaves no file either, which is exactly what the exit
+//     code is here to rule out.
+//   - a saved position inside the tail, i.e. quit during the credits.
+function isPlaybackFinished({ position_seconds: pos, duration_seconds: dur, exit_code: code }) {
+  if (dur == null) return false;
+  if (pos == null) return code === 0;
+  // The duration IPC query can occasionally get an implausible answer back
+  // from mpv — same "just don't trust it if it looks wrong" philosophy as the
+  // null checks above.
+  if (pos > dur) return false;
+  return pos >= dur - resumeTailFor(dur);
+}
+
+// A finished item shouldn't sit in Continue Watching still pointing at the
+// thing you just watched. A series rolls forward to the next episode; anything
+// else just drops its progress so clicking it starts over instead of
+// reopening at EOF.
+//
+// The roll-forward is optimistic — the same unbounded +1 that the Next Episode
+// button already does (see sequentialNav) — because the only way to know a
+// season's real length here is a TMDB lookup, and the API key it needs may not
+// be set. So finishing a season finale can leave a card pointing one episode
+// past the end.
+function finishContinueWatching(watchId) {
+  const entry = getContinueWatching().find((e) => e.id === watchId);
+  if (!entry) return;
+  const { positionSeconds, durationSeconds, ...rest } = entry;
+  const episodeNumber = Number(entry.episode);
+  if (entry.kind === 'series' && Number.isFinite(episodeNumber)) {
+    saveContinueWatching({ ...rest, episode: episodeNumber + 1 });
+  } else {
+    saveContinueWatching(rest);
+  }
+}
+
 function initPlaybackProgressEvents() {
   onEvent('playback-progress', (payload) => {
-    // The duration IPC query can occasionally get an implausible answer back
-    // from mpv — same "just don't show it if it looks wrong" philosophy as
-    // the null checks below.
-    if (payload.position_seconds == null || payload.duration_seconds == null) return;
-    if (payload.position_seconds > payload.duration_seconds) return;
-    updateContinueWatchingProgress(payload.watch_id, payload.position_seconds, payload.duration_seconds);
+    if (payload.duration_seconds == null) return;
+    if (isPlaybackFinished(payload)) {
+      finishContinueWatching(payload.watch_id);
+    } else {
+      if (payload.position_seconds == null) return;
+      if (payload.position_seconds > payload.duration_seconds) return;
+      updateContinueWatchingProgress(payload.watch_id, payload.position_seconds, payload.duration_seconds);
+    }
     renderContinueWatching();
   });
 }
@@ -2289,14 +2347,21 @@ function wireActionButton(btnId, statusId, loadingText, action, onSuccess) {
 }
 
 function initAniCliUpdate() {
-  // Best-effort: ani-cli isn't found on PATH until it's actually installed,
-  // so a lookup failure here just leaves the version tag blank rather than
+  // Best-effort: ani-cli isn't found until it's actually installed, so a
+  // lookup failure here just leaves the version tag blank rather than
   // surfacing as an error (the update button below already reports that).
-  api.getAniCliVersion().then((v) => {
+  const showVersion = () => api.getAniCliVersion().then((v) => {
     document.getElementById('ani-cli-version').textContent = `v${v}`;
   }).catch(() => {});
+  showVersion();
 
   wireActionButton('update-ani-cli-btn', 'update-ani-cli-status', 'Checking for update...', api.updateAniCli);
+
+  // The setup script's lines stream in while it runs; its final result then
+  // replaces them with the full log (see setup_anime_tools in player.rs).
+  const setupStatus = document.getElementById('setup-anime-status');
+  onEvent('anime-setup-log', (line) => { setupStatus.textContent += `\n${line}`; });
+  wireActionButton('setup-anime-btn', 'setup-anime-status', 'Setting up anime playback...', api.setupAnimeTools, showVersion);
 }
 
 function initMovieboxTuiUpdate() {

@@ -36,6 +36,8 @@ export const api = {
   watchEpisode: (query, index, episode, quality) => invoke('watch_episode', { query, index, episode, quality }),
   updateAniCli: () => invoke('update_ani_cli', {}),
   getAniCliVersion: () => invoke('get_ani_cli_version', {}),
+  // Streams its output as 'anime-setup-log' events while it runs.
+  setupAnimeTools: () => invoke('setup_anime_tools', {}),
   updateMovieboxTui: () => invoke('update_moviebox_tui', {}),
   getMovieboxTuiVersion: () => invoke('get_moviebox_tui_version', {}),
   // page starts at 1; returns { results, has_more } so the UI can offer

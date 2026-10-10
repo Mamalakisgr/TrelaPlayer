@@ -50,38 +50,40 @@ browser and launcher, not a video player.
 - [AniList](https://anilist.co/) and [TMDB](https://www.themoviedb.org/) APIs
   for metadata
 
-## Getting started
+## Install (Windows)
 
-### Windows — guided install
+1. Download `trela_<version>_x64-setup.exe` from the
+   [latest release](https://github.com/Mamalakisgr/TrelaPlayer/releases/latest)
+   and run it. No admin rights are needed. Windows SmartScreen may warn
+   about an unrecognised app because the installer isn't code-signed: click
+   **More info → Run anyway**.
+2. **Movies & Series** work straight away. mpv comes bundled. They need a
+   free TMDB API key (themoviedb.org → Settings → API, no cost, no card),
+   entered under **About** in the app.
+3. **Anime** needs a one-time setup: open **About** and click
+   **Set Up Anime Playback**. It downloads ani-cli and the few tools it
+   depends on into `%LOCALAPPDATA%\Trela\tools`. That folder is all it
+   touches: no admin rights, no PATH or system changes. If you already
+   have `ani-cli` on your PATH (e.g. via Scoop), Trela uses that instead.
+
+To remove Trela, uninstall it from Windows Settings → Apps, then delete
+`%LOCALAPPDATA%\Trela` if you ran the anime setup.
+
+## Building from source
+
+Prerequisites: [Rust](https://www.rust-lang.org/tools/install) and the
+[Tauri prerequisites](https://tauri.app/start/prerequisites/) (Microsoft C++
+Build Tools and WebView2), plus the Tauri CLI (`cargo install tauri-cli`).
+The anime tools come from the same in-app setup as above, or from running
+the script directly:
 
 ```powershell
-.\scripts\install-windows.ps1
+powershell -ExecutionPolicy Bypass -File scripts\setup-anime.ps1
 ```
-
-Checks for Git, Scoop, `ani-cli`, `moviebox-tui`, and the Rust toolchain;
-installs what's missing (asking before any system change); then builds and
-runs the app. See `installer/packages.json` for the package IDs it installs
-from.
-
-### Manual setup
-
-Prerequisites:
-
-- [Rust](https://www.rust-lang.org/tools/install) and the
-  [Tauri CLI](https://tauri.app/start/prerequisites/)
-- [`ani-cli`](https://github.com/pystardust/ani-cli) and
-  [`moviebox-tui`](https://crates.io/crates/moviebox-tui) on your `PATH`
-- [`mpv`](https://mpv.io/installation/)
 
 ```bash
 cargo tauri dev
 ```
-
-### TMDB API key
-
-Movies and Series need a free TMDB API key (themoviedb.org → Settings → API,
-no cost, no card) — enter it under **About** in the app once it's running.
-Anime works with no key at all.
 
 ## Development
 
@@ -91,6 +93,13 @@ Run `cargo tauri dev` to launch with hot-reload on the frontend files.
 
 ## Building a release
 
+Bump `version` in `src-tauri/tauri.conf.json`, then push a matching tag:
+
 ```bash
-cargo tauri build
+git tag v0.2.0 && git push origin v0.2.0
 ```
+
+The [Release workflow](.github/workflows/release.yml) builds the installer
+and attaches it to a draft GitHub release for you to review and publish. To
+build locally instead, run `cargo tauri build`; the installer lands in
+`src-tauri/target/release/bundle/nsis/`.

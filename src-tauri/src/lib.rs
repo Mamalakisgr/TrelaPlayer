@@ -28,6 +28,7 @@ pub fn run() {
             player::watch_episode,
             player::update_ani_cli,
             player::get_ani_cli_version,
+            player::setup_anime_tools,
             player::update_moviebox_tui,
             player::get_moviebox_tui_version,
             tmdb::search_movies,

@@ -1,5 +1,5 @@
 use crate::models::{Episode, ResolvedAnime};
-use crate::procutil::find_exe;
+use crate::procutil::{find_tool, ANIME_SETUP_HINT};
 use std::process::Command;
 
 // ani-cli itself searches hianime.at (as of ani-cli 5.1.1 — it has already
@@ -22,7 +22,7 @@ use std::process::Command;
 const BASE_URL: &str = "https://hianime.at";
 
 fn curl_impersonate_path() -> String {
-    find_exe(&["curl-impersonate.exe", "curl-impersonate"]).unwrap_or_else(|| "curl-impersonate.exe".to_string())
+    find_tool(&["curl-impersonate.exe", "curl-impersonate"]).unwrap_or_else(|| "curl-impersonate.exe".to_string())
 }
 
 // The scraped provider can sit behind a Cloudflare managed challenge that
@@ -85,6 +85,9 @@ fn curl_impersonate_get(url: &str) -> Result<String, String> {
         ])
         .output()
         .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return ANIME_SETUP_HINT.to_string();
+            }
             format!(
                 "Failed to run curl-impersonate ({}): {}. {} (what ani-cli itself searches) requires \
                  curl-impersonate to get past Cloudflare — the same tool ani-cli needs for this exact reason.",

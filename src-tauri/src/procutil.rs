@@ -1,5 +1,7 @@
 use rand::Rng;
+use std::ffi::OsString;
 use std::future::Future;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
@@ -27,6 +29,38 @@ pub fn find_exe(names: &[&str]) -> Option<String> {
         }
     }
     None
+}
+
+/// Shown wherever anime playback fails because a tool it needs is missing.
+pub const ANIME_SETUP_HINT: &str =
+    "Anime playback isn't set up yet — open the About page and click \"Set Up Anime Playback\".";
+
+/// Where scripts/setup-anime.ps1 installs anime playback's tools. Trela
+/// looks here itself instead of relying on PATH, which the setup script
+/// doesn't touch (and which a running Trela wouldn't see change anyway).
+pub fn tools_dir() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|dir| dir.join("Trela").join("tools"))
+}
+
+/// `find_exe`, falling back to the tools dir — so a tool the user already
+/// had on PATH (e.g. a Scoop install) keeps winning over Trela's copy.
+pub fn find_tool(names: &[&str]) -> Option<String> {
+    find_exe(names).or_else(|| {
+        let dir = tools_dir()?;
+        names.iter().map(|name| dir.join(name)).find(|path| path.is_file()).map(|path| path.display().to_string())
+    })
+}
+
+/// PATH for ani-cli's process: the user's own PATH first, then the tools dir
+/// (fzf, curl_chrome116) and Trela's own folder, home of the bundled mpv.exe
+/// sidecar — a machine without mpv still plays anime, one with its own mpv
+/// keeps using it.
+pub fn tool_path_env() -> OsString {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let mut dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+    dirs.extend(tools_dir());
+    dirs.extend(std::env::current_exe().ok().and_then(|exe| exe.parent().map(PathBuf::from)));
+    std::env::join_paths(dirs).unwrap_or(path)
 }
 
 /// Shared retry/backoff skeleton for the reqwest-based JSON HTTP clients

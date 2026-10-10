@@ -1,0 +1,43 @@
+name: Release
+
+# Builds the Windows installer (trela_<version>_x64-setup.exe).
+#   - Push a tag like v0.2.0 to also attach it to a draft GitHub release;
+#     review the draft and publish it. Bump "version" in
+#     src-tauri/tauri.conf.json first, since that's what names the installer.
+#   - Or run it by hand from the Actions tab to just get the installer as a
+#     build artifact.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Build installer
+        run: npx --yes @tauri-apps/cli@2 build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trela-windows-installer
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+
+      - name: Attach to draft release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: src-tauri/target/release/bundle/nsis/*-setup.exe

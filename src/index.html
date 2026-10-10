@@ -426,8 +426,15 @@
             <div class="settings-section">
               <h3 class="section-heading">ani-cli <span id="ani-cli-version" class="version-tag"></span></h3>
               <p class="muted-block">
-                Trela uses ani-cli to resolve and play episodes. If playback stops working, the site ani-cli
-                searches may have changed something — updating ani-cli often fixes it once a new version ships.
+                Trela uses ani-cli to resolve and play episodes. It needs a few extra tools, so the first time,
+                click <strong>Set Up Anime Playback</strong> to download them (no admin rights needed; a few minutes
+                at most). Movies &amp; Series don't need this.
+              </p>
+              <button id="setup-anime-btn" type="button" class="btn btn-primary">Set Up Anime Playback</button>
+              <pre id="setup-anime-status" class="update-status"></pre>
+              <p class="muted-block">
+                If playback stops working, the site ani-cli searches may have changed something — updating ani-cli
+                often fixes it once a new version ships.
               </p>
               <button id="update-ani-cli-btn" type="button" class="btn btn-secondary">Check for ani-cli Update</button>
               <pre id="update-ani-cli-status" class="update-status"></pre>
