@@ -1,8 +1,9 @@
 name: Release
 
 # Builds the Windows installer (trela_<version>_x64-setup.exe).
-#   - Push a tag like v0.2.0 to also attach it to a draft GitHub release;
-#     review the draft and publish it. Bump "version" in
+#   - Publishing a release on GitHub with a new tag like v1.0.1 (or pushing
+#     that tag yourself) also attaches the installer to that release,
+#     creating the release if it doesn't exist yet. Bump "version" in
 #     src-tauri/tauri.conf.json first, since that's what names the installer.
 #   - Or run it by hand from the Actions tab to just get the installer as a
 #     build artifact.
@@ -34,10 +35,11 @@ jobs:
           name: trela-windows-installer
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
 
-      - name: Attach to draft release
+      # No `draft:` on purpose: setting it would also flip a release that's
+      # already published back to a draft.
+      - name: Attach to release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
           generate_release_notes: true
           files: src-tauri/target/release/bundle/nsis/*-setup.exe

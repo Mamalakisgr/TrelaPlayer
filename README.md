@@ -93,13 +93,12 @@ Run `cargo tauri dev` to launch with hot-reload on the frontend files.
 
 ## Building a release
 
-Bump `version` in `src-tauri/tauri.conf.json`, then push a matching tag:
+1. Bump `version` in `src-tauri/tauri.conf.json`, commit, and push.
+2. On GitHub, publish a new release with a matching new tag (e.g. `v1.0.1`).
+   Leave **Set as a pre-release** unchecked, or the "latest release" link
+   above won't find it.
 
-```bash
-git tag v0.2.0 && git push origin v0.2.0
-```
-
-The [Release workflow](.github/workflows/release.yml) builds the installer
-and attaches it to a draft GitHub release for you to review and publish. To
+The [Release workflow](.github/workflows/release.yml) then builds the
+installer and attaches it to that release, usually within 20 minutes. To
 build locally instead, run `cargo tauri build`; the installer lands in
 `src-tauri/target/release/bundle/nsis/`.
